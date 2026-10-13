@@ -1,5 +1,6 @@
 /* Motor financeiro — valores em centavos; mês financeiro de 26 a 25. */
-export const STORAGE_KEY = 'caixa-semanal-v2';
+export const STORAGE_KEY = 'caixa-semanal-v3';
+export const PREVIOUS_STORAGE_KEY = 'caixa-semanal-v2';
 export const LEGACY_STORAGE_KEY = 'caixa-semanal-v1';
 const DAY = 86400000;
 const pad = n => String(n).padStart(2, '0');
@@ -104,40 +105,101 @@ export function newMonth(key,budget,startCash,startCard,goals) {
   return {key,budget,startCash,startCard,goals,snapshots:[],future:[],createdAt:new Date().toISOString()};
 }
 export function orderedSnapshots(month) {return [...month.snapshots].sort((a,b)=>a.at.localeCompare(b.at));}
+// A última posição informada é a fonte de verdade. Um lançamento marcado como
+// realizado depois dela atualiza a posição provisoriamente. Na atualização
+// seguinte, o saldo/fatura informado substitui esse ajuste (sem duplicação).
 export function position(month,asOf=null) {
   const records=orderedSnapshots(month).filter(s=>!asOf||s.at<=asOf);
-  return records.at(-1)||{cash:month.startCash,card:month.startCard,at:null,initial:true};
+  const last=records.at(-1);
+  const base=last||{cash:month.startCash,card:month.startCard,at:null,initial:true};
+  const pos={...base};
+  const mark=base.at||`${financialPeriod(month.key).start}T00:00`;
+  for(const f of month.future) {
+    if(!f.done || !f.doneAt || (asOf && f.doneAt>asOf))continue;
+    if(f.snapshotCountAtDone!==undefined && records.length>f.snapshotCountAtDone)continue;
+    if(f.doneAt<mark || (f.doneAt===mark && f.snapshotCountAtDone===undefined))continue;
+    if((f.kind||'debit')==='credit')pos.cash+=f.amount;
+    else if(f.type==='card')pos.card+=f.amount;
+    else pos.cash-=f.amount;
+  }
+  return pos;
 }
 export function openCash(month,pos) {return pos.cash-pos.card;}
 export function spentSinceStart(month,pos) {return (month.startCash-month.startCard)-openCash(month,pos);}
 export function pendingFuture(month) {return month.future.filter(item=>!item.done);}
-export function pendingByWeek(month) {
+export function pendingByWeek(month,kind='debit') {
   const pending=[0,0,0,0];
   for(const item of pendingFuture(month)) {
-    if(!inFinancialMonth(item.date,month.key))continue;
+    if((item.kind||'debit')!==kind || !inFinancialMonth(item.date,month.key))continue;
     const w=weekOfDate(item.date);
     if(w>=0)pending[w]+=item.amount;
   }
   return pending;
 }
-// A reserva de cada semana já inclui futuros da semana; protege semanas seguintes.
+function distribute(weights, amount) {
+  const sum=weights.reduce((a,b)=>a+b,0);
+  const result=weights.map(()=>0);
+  if(!sum || amount<=0)return result;
+  let allocated=0;
+  for(let i=0;i<weights.length;i++) {
+    result[i]=i===weights.length-1 ? amount-allocated : Math.floor(amount*weights[i]/sum);
+    allocated+=result[i];
+  }
+  return result;
+}
+function reduceProportionally(amounts, deduction) {
+  const cut=distribute(amounts,Math.min(deduction,amounts.reduce((a,b)=>a+b,0)));
+  return amounts.map((value,i)=>value-cut[i]);
+}
+// As despesas previstas reduzem o dinheiro LIVRE de todas as semanas ainda
+// abertas, proporcionalmente ao espaço disponível. O vencimento só serve para
+// calendário e histórico; não posterga a reserva.
+// Créditos futuros entram na projeção a partir da semana de recebimento.
 export function calculatePlan(month,pos,activeWeek) {
+  const active=Math.max(0,Math.min(3,activeWeek));
   const spent=spentSinceStart(month,pos);
   const budgetLeft=month.budget-spent;
   const liquid=openCash(month,pos);
   const rawPool=Math.min(budgetLeft,liquid);
-  let pool=Math.max(0,rawPool);
-  const commitments=pendingByWeek(month);
-  const start=Math.max(0,Math.min(3,activeWeek));
-  const desired=month.goals.map((goal,i)=>Math.max(goal,commitments[i]));
-  const surplus=Math.max(0,pool-desired.slice(start).reduce((sum,n)=>sum+n,0));
-  desired[3]+=surplus;
+  const commitments=pendingByWeek(month,'debit');
+  const income=pendingByWeek(month,'credit');
+  const finished=month.future.filter(f=>f.done&&f.doneAt&&inFinancialMonth(f.doneAt,month.key)&&weekOfDate(f.doneAt)>=active);
+  const completedDebit=finished.filter(f=>(f.kind||'debit')==='debit').reduce((s,f)=>s+f.amount,0);
+  const completedCredit=finished.filter(f=>f.kind==='credit').reduce((s,f)=>s+f.amount,0);
+  const bufferedPool=Math.max(0,rawPool+completedDebit-completedCredit);
+  const desired=[...month.goals];
+  const base=[null,null,null,null];
+  let remainder=bufferedPool;
+  for(let i=3;i>=active;i--){base[i]=Math.min(remainder,desired[i]);remainder-=base[i];}
+  base[3]+=remainder;
+  const before=base.slice(active);
+  const reserve=commitments.reduce((a,b)=>a+b,0)+completedDebit;
+  let adjusted=reduceProportionally(before,reserve);
+  const creditsByWeek=[...income];
+  for(const f of finished.filter(f=>f.kind==='credit'))creditsByWeek[Math.max(active,weekOfDate(f.doneAt))]+=f.amount;
+  const creditSum=creditsByWeek.reduce((a,b)=>a+b,0);
+  for(let w=active;w<4;w++) {
+    const amount=creditsByWeek[w];
+    if(!amount)continue;
+    const offset=w-active;
+    const weights=adjusted.slice(offset).map((v,i)=>Math.max(v,month.goals[w+i]));
+    const allocations=distribute(weights,amount);
+    allocations.forEach((n,i)=>adjusted[offset+i]+=n);
+  }
   const available=[null,null,null,null];
-  for(let i=3;i>=start;i--){available[i]=Math.min(pool,desired[i]);pool-=available[i];}
-  return {available,desired,commitments,spent,budgetLeft,liquid,rawPool,insufficient:Math.max(0,-rawPool),
-    futureCard:pendingFuture(month).filter(e=>e.type==='card').reduce((s,e)=>s+e.amount,0),
-    futurePix:pendingFuture(month).filter(e=>e.type==='pix').reduce((s,e)=>s+e.amount,0)};
+  adjusted.forEach((value,i)=>available[active+i]=value);
+  const pendingDebit=commitments.reduce((a,b)=>a+b,0);
+  const projectedPool=rawPool-pendingDebit+income.reduce((a,b)=>a+b,0);
+  const uncoveredFuture=Math.max(0,reserve-bufferedPool);
+  return {available,desired,commitments,income,uncoveredFuture,spent,budgetLeft,liquid,rawPool,
+    projectedPool,insufficient:Math.max(0,-rawPool),
+    futureCard:pendingFuture(month).filter(e=>(e.kind||'debit')==='debit'&&e.type==='card').reduce((s,e)=>s+e.amount,0),
+    futurePix:pendingFuture(month).filter(e=>(e.kind||'debit')==='debit'&&e.type==='pix').reduce((s,e)=>s+e.amount,0),
+    futureCredit:income.reduce((a,b)=>a+b,0), totalDebit:pendingDebit,
+    completedDebit,completedCredit};
 }
+// 'available' já é líquido das despesas previstas — nada é subtraído duas vezes.
+export function freeForNewSpending(plan,index) {return plan.available[index];}
 export function effectiveWeek(key,pos,today=new Date()) {
   const current=monthKey(today);
   if(key>current)return 0;
@@ -148,19 +210,23 @@ export function pastWeekPosition(month,selectedWeek) {
   const week=financialPeriod(month.key).weeks[selectedWeek];
   if(!week)return null;
   const end=`${week.end}T23:59`;
-  return orderedSnapshots(month).filter(s=>s.at<=end&&weekOfDate(s.at)===selectedWeek).at(-1)||null;
+  const hasEvents=orderedSnapshots(month).some(s=>s.at<=end&&weekOfDate(s.at)===selectedWeek)
+    ||month.future.some(f=>f.doneAt&&f.doneAt<=end&&weekOfDate(f.doneAt)===selectedWeek);
+  return hasEvents ? position(month,end):null;
 }
 export function actualWeekSpent(month,index) {
   const week=financialPeriod(month.key).weeks[index];
   if(!week)return null;
-  const snapshots=orderedSnapshots(month);
-  const inside=snapshots.filter(s=>weekOfDate(s.at)===index);
-  if(!inside.length)return null;
-  const cutoff=`${week.start}T00:00`;
-  const prior=snapshots.filter(s=>s.at<cutoff).at(-1);
-  if(index>0&&!prior)return null;
-  const baseline=prior||{cash:month.startCash,card:month.startCard};
-  return openCash(month,baseline)-openCash(month,inside.at(-1));
+  const end=`${week.end}T23:59`, start=`${week.start}T00:00`;
+  const snaps=orderedSnapshots(month);
+  const events=snaps.some(s=>s.at>=start&&s.at<=end)
+    ||month.future.some(f=>f.doneAt&&f.doneAt>=start&&f.doneAt<=end);
+  if(!events)return null;
+  const prior=snaps.filter(s=>s.at<start).at(-1);
+  const priorEvents=month.future.some(f=>f.doneAt&&f.doneAt<start);
+  if(index>0&&!prior&&!priorEvents)return null;
+  const previous=new Date(Date.parse(start+'Z')-60000).toISOString().slice(0,16);
+  return openCash(month,position(month,previous))-openCash(month,position(month,end));
 }
 function validNumbers(month){return [month.budget,month.startCash,month.startCard].every(n=>Number.isSafeInteger(n)&&n>=0)
  &&Array.isArray(month.goals)&&month.goals.length===4&&month.goals.every(n=>Number.isSafeInteger(n)&&n>=0)
@@ -170,19 +236,27 @@ function validEntries(month,acceptDate){
   if(!month.snapshots.every(s=>s&&typeof s.id==='string'&&typeof s.at==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s.at)
     &&validLocalTime(s.at)&&acceptDate(s.at)&&[s.cash,s.card].every(n=>Number.isSafeInteger(n)&&n>=0)))return false;
   return month.future.every(f=>f&&typeof f.id==='string'&&typeof f.date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(f.date)
-    &&acceptDate(f.date)&&/^(card|pix)$/.test(f.type)&&typeof f.description==='string'&&Number.isSafeInteger(f.amount)&&f.amount>0&&typeof f.done==='boolean');
+    &&acceptDate(f.date)&&/^(card|pix)$/.test(f.type)&&['debit','credit'].includes(f.kind||'debit')
+    &&(f.kind!=='credit'||f.type==='pix')&&typeof f.description==='string'&&Number.isSafeInteger(f.amount)&&f.amount>0
+    &&typeof f.done==='boolean'&&(f.snapshotCountAtDone===undefined||(Number.isSafeInteger(f.snapshotCountAtDone)&&f.snapshotCountAtDone>=0))&&(!f.doneAt||(typeof f.doneAt==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(f.doneAt)&&validLocalTime(f.doneAt)&&acceptDate(f.doneAt))));
 }
 function validLocalTime(at){const hr=Number(at.slice(11,13)),min=Number(at.slice(14,16));return hr<24&&min<60;}
 export function validateMonth(value){return Boolean(value&&typeof value==='object'&&parseKey(value.key)&&validNumbers(value)&&validEntries(value,date=>inFinancialMonth(date,value.key)));}
-export function validateState(value){return Boolean(value&&value.version===2&&value.months&&typeof value.months==='object'&&!Array.isArray(value.months)
+export function validateState(value){return Boolean(value&&value.version===3&&value.months&&typeof value.months==='object'&&!Array.isArray(value.months)
   &&Object.entries(value.months).every(([key,m])=>key===m.key&&validateMonth(m)));}
+export function validatePreviousState(value){return Boolean(value&&value.version===2&&value.months&&typeof value.months==='object'&&!Array.isArray(value.months)
+  &&Object.entries(value.months).every(([key,m])=>key===m.key&&validateMonth(m)));}
+export function migratePreviousState(value){
+  if(!validatePreviousState(value))throw new Error('Backup v2 inválido.');
+  return {version:3,months:Object.fromEntries(Object.entries(value.months).map(([key,m])=>[key,{...m,future:m.future.map(f=>({...f,kind:f.kind||'debit'}))}]))};
+}
 export function validateLegacyState(value){return Boolean(value&&value.version===1&&value.months&&typeof value.months==='object'&&!Array.isArray(value.months)
   &&Object.entries(value.months).every(([key,m])=>m&&key===m.key&&parseKey(key)&&validNumbers(m)&&validEntries(m,date=>String(date).slice(0,7)===key)));}
 // Cópia não destrutiva do armazenamento antigo. Os saldos iniciais precisam
 // ser revisados pelo usuário, pois a base muda do dia 1 para o dia 26.
 export function migrateLegacyState(old) {
   if(!validateLegacyState(old))throw new Error('Backup antigo inválido.');
-  const output={version:2,months:{}};
+  const output={version:3,months:{}};
   const template=(key,source)=>({...source,key,goals:[...source.goals],snapshots:[],future:[],migratedFromCalendar:true});
   for(const [key,m] of Object.entries(old.months))output.months[key]=template(key,m);
   for(const source of Object.values(old.months)) {
@@ -194,7 +268,7 @@ export function migrateLegacyState(old) {
     for(const entry of source.future){
       const key=financialMonthOfDate(entry.date);
       if(!output.months[key])output.months[key]=template(key,source);
-      output.months[key].future.push({...entry});
+      output.months[key].future.push({...entry,kind:'debit'});
     }
   }
   if(!validateState(output))throw new Error('Falha ao converter backup antigo.');

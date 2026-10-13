@@ -1,88 +1,63 @@
 # Caixa — controle financeiro semanal
 
-Aplicativo web/PWA em português, em reais, feito com HTML, CSS e JavaScript puro. Funciona com **GitHub Pages**, sem servidor, contas ou dependências externas.
+Aplicativo PWA em português, com valores em reais, para GitHub Pages. Não precisa de conta, servidor ou bibliotecas externas. Os dados ficam apenas no navegador.
 
-## O que faz
+## Calendário e metas
 
-- Usa **mês financeiro do dia 26 do mês anterior até o dia 25 do mês de referência**, inclusive, independentemente do mês calendário.
-- Divide os dias do período em **4 semanas o mais equilibradas possível**, distribuindo os dias extras primeiro nas semanas iniciais. Em outubro de 2026: **S1: 26/09–03/10; S2: 04/10–11/10; S3: 12/10–18/10; S4: 19/10–25/10**.
-- Permite criar uma **meta mensal** e quatro metas semanais originais, cuja soma corresponde ao orçamento total.
-- Recalcula quanto **ainda pode ser gasto em cada semana** usando o saldo bancário e a fatura de cartão em aberto. As semanas seguintes ficam protegidas primeiro.
-- Registra quantas atualizações de **saldo atual da conta** e **fatura em aberto** forem necessárias, com data, hora e observação.
-- Guarda o planejamento original e o histórico de cada atualização.
-- Permite lançar despesas **futuras** de Cartão ou Pix, com data, valor e descrição; elas são consideradas dentro da meta da semana, sem desconto em duplicidade.
-- Mostra se existe dinheiro suficiente para pagar a fatura em aberto.
-- Inclui gráfico de evolução acumulada e backup em **JSON** para exportar/importar.
-- Funciona offline depois de carregado no navegador, quando instalado ou via GitHub Pages com cache.
+- Cada mês financeiro começa no **dia 26 do mês anterior** e termina no **dia 25** do mês de referência.
+- As quatro semanas são divididas de maneira equilibrada; outubro de 2026: 26/09–03/10, 04/10–11/10, 12/10–18/10 e 19/10–25/10.
+- As **metas originais** são definidas uma vez por mês e permanecem visíveis. A **meta disponível** se recalcula com gastos, créditos e previsões.
+- O aplicativo considera **caixa livre = dinheiro na conta − fatura em aberto**. O fechamento pretendido é zero depois de destinar todos os recursos, inclusive eventual Pix para investimento.
 
-## Publicar no GitHub Pages
+## Primeira configuração
 
-1. Crie um repositório público no GitHub, por exemplo `caixa-semanal`.
-2. Envie **todos os arquivos desta pasta para a raiz do repositório**, incluindo `index.html`, `app.js`, `logic.js`, `styles.css`, `manifest.webmanifest`, `service-worker.js`, ícones e `.nojekyll`. A pasta `tests` e os arquivos de documentação são opcionais para publicação.
-3. No repositório, abra **Settings → Pages**.
-4. Em **Build and deployment**, escolha **Deploy from a branch**, selecione **main** e a pasta **/(root)**, e salve.
-5. Use o endereço publicado pelo GitHub, normalmente `https://SEU-USUARIO.github.io/caixa-semanal/`.
-6. No iPhone, abra o site no Safari e use **Compartilhar → Adicionar à Tela de Início**, se desejar usar como app.
+1. Entre em **Metas → Editar**, defina o orçamento mensal e as quatro metas semanais. A soma das quatro metas deve ser igual ao orçamento mensal.
+2. Preencha o **saldo bancário inicial** e a **fatura inicial** na abertura financeira (dia 26).
+3. Em **Painel → Atualizar posição**, informe o **saldo total atual** e a **fatura total em aberto**, não apenas a diferença da última atualização.
+4. Consulte no Painel quanto **resta para novos gastos na semana**. Pode atualizar a posição quantas vezes quiser.
 
-Não é necessário npm, instalação de dependências nem build.
+## Despesas previstas e créditos
 
-## Como começar
+Em **Metas → Lançamentos → Adicionar**, cadastre:
 
-1. Abra o mês financeiro (ex.: **Outubro 2026** significa **26/09/2026 a 25/10/2026**) e toque em **Criar planejamento mensal**.
-2. Informe o **orçamento do mês**, o **saldo bancário do dia 26**, a **fatura em aberto naquele dia** e as quatro metas originais. No mês financeiro de outubro, o saldo inicial é o de **26 de setembro**.
-3. Use **Atualizar posição** para registrar o saldo bancário e a fatura atual. O painel recalcula imediatamente as metas.
-4. Se quiser, registre despesas futuras em **Metas → Lançamentos futuros** e marque-as como realizadas quando aparecerem no cartão ou saírem por Pix.
-5. Acesse **Histórico** para consultar a evolução e fazer backup.
+- **Saída · Pix:** pagamento que futuramente reduzirá o saldo da conta.
+- **Saída · Cartão:** compra que aumentará o valor da fatura em aberto.
+- **Entrada · Crédito:** dinheiro esperado na conta, como recebimento ou reembolso.
 
-**Exemplo:** orçamento R$ 12.000, saldo inicial R$ 12.000, fatura inicial R$ 0, quatro metas de R$ 3.000. Depois de atualizar a fatura para R$ 8.000 e manter o saldo bancário em R$ 12.000, a terceira semana terá R$ 1.000 disponíveis, preservando R$ 3.000 para a quarta.
+O campo **data** indica quando o lançamento é esperado. Uma despesa futura já é abatida **imediatamente do dinheiro livre das semanas ainda abertas**, distribuindo a dedução proporcionalmente à disponibilidade de cada uma; não precisa aguardar o vencimento. Um crédito previsto aumenta a projeção **a partir da semana do recebimento programado**.
 
-## Regras financeiras
+Para lançar dinheiro que **já entrou**, vá ao **Painel → Registrar crédito recebido**. Ele entra como realizado e atualiza o cálculo imediatamente.
 
-- **Pix realizado**: reduz o saldo bancário imediatamente.
-- **Compra no cartão**: aumenta a fatura em aberto, sem reduzir o saldo bancário naquele momento.
-- **Pagamento da fatura**: diminui a conta e a fatura pelo mesmo valor; o resultado líquido não muda, portanto não conta como despesa nova.
-- **Pix para investimento**: é tratado como qualquer outra saída do caixa, sem categoria separada.
-- **Caixa livre = saldo bancário − fatura em aberto**. A meta é que, depois de pagar a fatura e destinar o restante aos gastos planejados, ele se aproxime de **R$ 0** no fechamento.
-- **Gasto do mês = caixa livre inicial − caixa livre atual**. A conta pressupõe que o dinheiro destinado ao mês já foi colocado na conta no início. Se entrar dinheiro novo no meio do mês, o cálculo de gasto não consegue distinguir automaticamente a entrada de uma economia. Nesse caso, reveja o planejamento ou use um mês novo. **Não há integração bancária.**
-- A reserva para cada semana inclui as despesas futuras daquela semana; o sistema usa o maior valor entre a meta original e o total futuro ainda pendente dessa semana. **Não soma a mesma despesa duas vezes.**
-- Os valores **já refletidos na fatura ou no saldo** devem ser marcados como realizados na lista de futuros.
-- **O aplicativo não realiza Pix nem paga faturas.** Ele apenas acompanha o planejamento.
+### Botão “Marcar realizado”
 
-**Observação sobre datas:** o dia 25 pertence ao mês financeiro que está terminando, e o dia 26 já pertence ao mês financeiro seguinte. A data da posição ou do lançamento futuro deve cair no período exibido no topo do aplicativo. Os registros históricos só identificam os gastos exatos de uma determinada semana se houve atualizações suficientes para separar os períodos. O aplicativo não cria transações que não foram informadas.
+Esta opção foi mantida e **altera os cálculos de verdade**:
 
-## Atualização da versão anterior (mês calendário)
+- Despesa por Pix realizada → reduz provisoriamente o dinheiro em conta.
+- Despesa no cartão realizada → aumenta provisoriamente a fatura em aberto.
+- Crédito realizado → aumenta provisoriamente o dinheiro em conta.
+- O lançamento deixa de ser **Previsto** e passa a **Realizado**, sem ser somado duas vezes à previsão.
+- **Voltar a previsto** permite desfazer a marcação.
 
-Ao substituir os arquivos no mesmo endereço do GitHub Pages, o app procura os dados gravados pela versão antiga. **Ele cria automaticamente uma cópia no novo formato**, sem apagar o armazenamento antigo, e redistribui atualizações e futuros conforme suas datas reais:
+**Ordem recomendada:** primeiro marque os lançamentos como realizados; depois confira **Painel → Atualizar posição** e registre os saldos bancários verdadeiros. A nova posição bancária **substitui os efeitos provisórios** dos lançamentos já realizados, evitando duplicação. Se você já atualizou o banco/fatura e só depois marcou a despesa como realizada, **atualize a posição novamente** com os valores atuais para que o aplicativo não a desconte duas vezes.
 
-- Uma posição de **30/09** passa a pertencer ao **outubro financeiro**.
-- Uma posição de **26/10** passa a pertencer ao **novembro financeiro**.
-- Orçamentos e quatro metas de meses já criados são conservados sob seus nomes originais, mas a **posição inicial não pode ser deduzida com segurança**: a versão antiga começava no dia 1 e a nova começa no dia 26.
-- Por isso, nos meses que foram migrados, aparece um **aviso para conferir em Metas → Editar** o saldo bancário e a fatura do **dia 26**. Após salvar o planejamento revisado, o aviso desaparece.
+Ao pagar uma fatura, o saldo bancário e a fatura caem simultaneamente pelo mesmo valor. Isso não representa um novo gasto. Um Pix para investimento é considerado uma saída normal, conforme sua preferência.
 
-**Antes de atualizar os arquivos, faça um backup JSON pelo Histórico.** Um backup exportado pela versão anterior também pode ser importado nesta nova versão. A nova versão exporta no formato atualizado. Ao importar um backup, ele substitui os dados que estão no navegador.
+### Exemplo
 
-## Dados, privacidade e manutenção
+Orçamento: R$ 12.000; quatro metas de R$ 3.000. Se até o fim da segunda semana a fatura chegar a R$ 8.000, restam R$ 4.000 para as semanas 3 e 4: R$ 1.000 para S3 e R$ 3.000 para S4. Se você cadastrar um Pix futuro de R$ 1.800 para S4, ele será reservado **desde já**: passam a sobrar R$ 550 para S3 e R$ 1.650 para S4. Marcá-lo realizado altera o saldo, porém não cobra o valor duas vezes.
 
-- Tudo é salvo em `localStorage` no **navegador/dispositivo**. Os dados não vão automaticamente para o repositório GitHub.
-- Trocar de aparelho ou limpar dados do navegador pode apagar os registros. **Exporte o JSON com frequência.**
-- O backup contém seus valores financeiros em texto simples: guarde-o em local privado.
-- Para atualizar o aplicativo, substitua os arquivos no repositório. Se a versão antiga continuar aparecendo por causa do cache offline/PWA, feche e reabra o app ou atualize a página após a publicação.
-- O sistema não é um extrato bancário, nem um livro-caixa de partidas dobradas; é uma ferramenta de acompanhamento de metas semanais.
+## Atualizar no GitHub Pages
 
-## Rodar localmente
+1. **Antes de atualizar:** acesse **Histórico → Exportar JSON** e faça uma cópia do seu backup.
+2. Extraia o ZIP e envie o conteúdo da pasta para a **raiz** do repositório. Substitua `index.html`, `app.js`, `logic.js`, `styles.css`, `service-worker.js`, `README.md` e os demais arquivos.
+3. Em **Settings → Pages**, selecione **Deploy from a branch → main → /(root)**.
+4. No iPhone, abra o site publicado no Safari e use **Compartilhar → Adicionar à Tela de Início**, se desejar.
+5. Se uma versão anterior continuar aparecendo, atualize a página e feche/reabra o aplicativo para renovar o cache.
 
-Por usar módulos JavaScript, abra a pasta em um servidor HTTP estático, por exemplo:
+A nova versão lê os registros anteriores automaticamente e mantém uma cópia não modificada do armazenamento antigo. Também aceita backups JSON antigos para importação. **Não apague o armazenamento do navegador.** O backup contém informações financeiras em texto simples: guarde-o em local privado.
 
-```bash
-python -m http.server 8000
-```
+## Histórico e testes
 
-Depois abra `http://localhost:8000` no navegador.
+**Histórico** apresenta as posições registradas, as despesas acumuladas e o gráfico. Os lançamentos realizados também influenciam o gráfico. O aplicativo não acessa sua conta bancária nem envia Pix.
 
-## Testes
-
-Requer Node.js 18+ somente para testes (não para publicar):
-
-```bash
-npm test
-```
+Para rodar testes unitários (Node.js 18+), execute `npm test`. Para abrir localmente, use um servidor estático (`python -m http.server 8000`).

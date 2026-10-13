@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   newMonth,calculatePlan,spentSinceStart,defaultGoals,centsFromInput,brl,weekOfDate,
-  validateState,validateLegacyState,migrateLegacyState,actualWeekSpent,orderedSnapshots,
+  validateState,validatePreviousState,migratePreviousState,validateLegacyState,migrateLegacyState,actualWeekSpent,orderedSnapshots,
   monthKey,shiftMonth,financialMonthOfDate,financialPeriod,rangeLabel,inFinancialMonth,
-  dayIndex,periodLabel,pastWeekPosition,effectiveWeek,pendingByWeek
+  dayIndex,periodLabel,pastWeekPosition,effectiveWeek,pendingByWeek,freeForNewSpending,position
 } from '../logic.js';
 const money=n=>n*100;
 const create=()=>newMonth('2026-10',money(12000),money(12000),0,defaultGoals(money(12000)));
@@ -82,19 +82,15 @@ test('sobra das semanas encerradas vai à última semana',()=>{
   assert.equal(r.available[2],money(3000));
   assert.equal(r.available[3],money(4000));
 });
-test('futuros: 26/09 e 25/10 pertencem a outubro; 26/10 pertence a novembro',()=>{
+test('futuros pertencem ao mês financeiro correspondente, deduzidos desde a previsão',()=>{
   const m=create();
   m.future.push({id:'a',date:'2026-09-26',type:'pix',amount:money(500),description:'A',done:false});
   m.future.push({id:'b',date:'2026-10-25',type:'pix',amount:money(2000),description:'B',done:false});
   m.future.push({id:'c',date:'2026-10-26',type:'card',amount:money(9000),description:'Fora',done:false});
   assert.deepEqual(pendingByWeek(m),[money(500),0,0,money(2000)]);
   const r=calculatePlan(m,{cash:money(12000),card:money(8000)},2);
-  assert.equal(r.available[2],money(1000));
-  assert.equal(r.available[3],money(3000));
-  m.future.push({id:'d',date:'2026-10-25',type:'card',amount:money(1500),description:'Extra',done:false});
-  const r2=calculatePlan(m,{cash:money(12000),card:money(8000)},2);
-  assert.equal(r2.available[2],money(500));
-  assert.equal(r2.available[3],money(3500));
+  assert.deepEqual(r.available.slice(2),[money(375),money(1125)]);
+  assert.equal(r.totalDebit,money(2500));
 });
 test('entrada numérica pt-BR',()=>{
   assert.equal(centsFromInput('12.000,50'),1200050);
@@ -113,11 +109,11 @@ test('histórico atribui setembro e outubro à mesma semana, mas não inventa ba
   const n=create();n.snapshots=[record('y','2026-10-04T10:00',12000,5000)];
   assert.equal(actualWeekSpent(n,1),null);
 });
-test('validação de backup v2 e entrada de datas financeiras',()=>{
+test('validação de backup v3 e entrada de datas financeiras',()=>{
   const m=create();m.snapshots=[record('x','2026-09-26T18:00',12000,0)];
-  assert.ok(validateState({version:2,months:{'2026-10':m}}));
-  assert.equal(validateState({version:2,months:{'2026-10':{...m,goals:[0,0,0,0]}}}),false);
-  assert.equal(validateState({version:2,months:{'2026-10':{...m,snapshots:[record('y','2026-10-26T18:00',12000,0)]}}}),false);
+  assert.ok(validateState({version:3,months:{'2026-10':m}}));
+  assert.equal(validateState({version:3,months:{'2026-10':{...m,goals:[0,0,0,0]}}}),false);
+  assert.equal(validateState({version:3,months:{'2026-10':{...m,snapshots:[record('y','2026-10-26T18:00',12000,0)]}}}),false);
 });
 test('migração dos dados antigos por data, sem perder snapshots e futuros',()=>{
   const sep=newMonth('2026-09',money(12000),money(12000),0,defaultGoals(money(12000)));
@@ -144,4 +140,87 @@ test('duas atualizações no mesmo minuto mantêm a ordem de registro',()=>{
   m.snapshots.push(record('z','2026-10-12T15:00',12000,2000));
   m.snapshots.push(record('a','2026-10-12T15:00',12000,3000));
   assert.equal(orderedSnapshots(m).at(-1).card,money(3000));
+});
+
+test('Pix futuro da S4 reduz desde já todas as semanas livres',()=>{
+  const m=create();
+  m.future.push({id:'d',date:'2026-10-23',type:'pix',kind:'debit',description:'Boleto',amount:money(2000),done:false});
+  const plan=calculatePlan(m,{cash:money(12000),card:0},0);
+  assert.deepEqual(plan.available,[money(2500),money(2500),money(2500),money(2500)]);
+  assert.equal(plan.totalDebit,money(2000));
+});
+test('o mesmo Pix compromete S3 antes de vencer na S4',()=>{
+  const m=create();
+  m.future.push({id:'d',date:'2026-10-23',type:'pix',description:'Fixa',amount:money(1800),done:false});
+  const plan=calculatePlan(m,{cash:money(12000),card:money(8000)},2);
+  assert.deepEqual(plan.available.slice(2),[money(550),money(1650)]);
+  assert.equal(plan.projectedPool,money(2200));
+});
+test('marcar Pix como realizado altera o saldo e mantém reserva sem duplicar',()=>{
+  const m=create(),f={id:'d',date:'2026-10-23',type:'pix',kind:'debit',description:'Despesa',amount:money(2000),done:false};
+  m.future.push(f);
+  const before=calculatePlan(m,position(m),0).available;
+  f.done=true;f.doneAt='2026-09-27T10:00';f.snapshotCountAtDone=0;
+  assert.equal(position(m).cash,money(10000));
+  const after=calculatePlan(m,position(m),0).available;
+  assert.deepEqual(after,before);
+  // Um saldo real informado depois da realização substitui o débito provisório.
+  m.snapshots.push(record('atualizado','2026-09-27T11:00',10000,0));
+  assert.equal(position(m).cash,money(10000));
+  assert.deepEqual(calculatePlan(m,position(m),0).available,before);
+});
+test('realização do cartão afeta fatura, não saldo bancário, e pagamento não duplica',()=>{
+  const m=create(),f={id:'cartao',date:'2026-10-20',type:'card',kind:'debit',description:'Compra',amount:money(500),done:true,doneAt:'2026-09-27T11:00',snapshotCountAtDone:0};
+  m.future.push(f);
+  assert.equal(position(m).cash,money(12000));
+  assert.equal(position(m).card,money(500));
+  m.snapshots.push(record('pago','2026-09-28T12:00',11500,0));
+  assert.equal(position(m).cash,money(11500));
+  assert.equal(position(m).card,0);
+  assert.equal(spentSinceStart(m,position(m)),money(500));
+});
+test('crédito previsto na S4 só aumenta projeção da S4, depois do recebimento',()=>{
+  const m=create();
+  m.future.push({id:'c',date:'2026-10-23',type:'pix',kind:'credit',description:'Extra',amount:money(1000),done:false});
+  assert.deepEqual(calculatePlan(m,position(m),0).available,[money(3000),money(3000),money(3000),money(4000)]);
+});
+test('crédito futuro realizado interfere imediatamente e não é duplicado após atualização',()=>{
+  const m=create();
+  const entry={id:'c',date:'2026-10-23',type:'pix',kind:'credit',description:'Extra',amount:money(1000),done:false};
+  m.future.push(entry);
+  const before=calculatePlan(m,position(m),0);
+  assert.equal(before.projectedPool,money(13000));
+  entry.done=true;entry.doneAt='2026-09-27T12:00';entry.snapshotCountAtDone=0;
+  assert.equal(position(m).cash,money(13000));
+  const after=calculatePlan(m,position(m),0);
+  assert.equal(after.projectedPool,money(13000));
+  assert.deepEqual(after.available,[money(3250),money(3250),money(3250),money(3250)]);
+  m.snapshots.push(record('s','2026-09-28T12:00',13000,0));
+  assert.equal(position(m).cash,money(13000));
+  assert.equal(calculatePlan(m,position(m),0).projectedPool,money(13000));
+});
+test('mesmo minuto de snapshot e realizado não elimina movimento novo',()=>{
+  const m=create();
+  m.snapshots.push(record('s','2026-10-13T13:00',12000,0));
+  m.future.push({id:'c',date:'2026-10-13',type:'pix',kind:'credit',description:'Extra',amount:money(100),done:true,doneAt:'2026-10-13T13:00',snapshotCountAtDone:1});
+  assert.equal(position(m).cash,money(12100));
+  m.snapshots.push(record('r','2026-10-13T13:01',12100,0));
+  assert.equal(position(m).cash,money(12100));
+});
+test('backup de versão 2 é preservado ao migrar para versão 3',()=>{
+  const m=create();m.future.push({id:'d',date:'2026-10-23',type:'pix',description:'Antiga',amount:money(50),done:true});
+  const v2={version:2,months:{'2026-10':m}};
+  assert.equal(validatePreviousState(v2),true);
+  const v3=migratePreviousState(v2);
+  assert.equal(validateState(v3),true);
+  assert.equal(v3.months['2026-10'].future[0].kind,'debit');
+  assert.equal(v3.months['2026-10'].future[0].doneAt,undefined);
+});
+test('pendente vencido continua abatido e compromisso acima da disponibilidade gera alerta',()=>{
+  const m=create();
+  m.future.push({id:'late',date:'2026-10-09',type:'pix',description:'Atrasada',amount:money(5000),done:false});
+  const plan=calculatePlan(m,{cash:money(12000),card:money(8000)},2);
+  assert.equal(plan.totalDebit,money(5000));
+  assert.equal(plan.uncoveredFuture,money(1000));
+  assert.deepEqual(plan.available.slice(2),[0,0]);
 });
