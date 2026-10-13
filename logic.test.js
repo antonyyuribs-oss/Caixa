@@ -265,3 +265,67 @@ test('crédito recebido após o vencimento não cobre débito na data',()=>{
   assert.equal(adequate.uncoveredFuture,0);
   assert.equal(adequate.projectedPool,money(1650));
 });
+
+// V7: garantia de cobertura, comparação prospectiva e conciliação cronológica.
+test('V7: o dinheiro que depende do crédito de 16/10 não é liberado antes de chegar',async()=>{
+  const {cashTimeline,availableBeforeCredits}=await import('../logic.js');
+  const m=newMonth('2026-10',2121861,2121861,0,defaultGoals(2121861));
+  m.snapshots=[{id:'s',at:'2026-10-13T15:09',cash:1260338,card:842970}];
+  m.future=[
+    {id:'d',date:'2026-10-14',type:'pix',kind:'debit',description:'Pagamento',amount:375000,done:false},
+    {id:'c',date:'2026-10-16',type:'pix',kind:'credit',description:'Entrada',amount:120000,done:false}
+  ];
+  const pos=position(m),timeline=cashTimeline(m,pos);
+  assert.equal(timeline.current,417368);
+  assert.equal(timeline.safeBeforeNewSpending,42368);
+  assert.equal(timeline.final,162368);
+  assert.equal(timeline.shortfall,0);
+  assert.equal(calculatePlan(m,pos,2).available[2],60000);
+  assert.equal(availableBeforeCredits(m,pos,2),0);
+});
+test('V7: um crédito posterior ao vencimento não esconde falta de cobertura na data',async()=>{
+  const {cashTimeline}=await import('../logic.js');
+  const m=create();
+  m.future=[
+    {id:'d',date:'2026-10-14',type:'pix',description:'Conta',amount:money(3750),done:false},
+    {id:'c',date:'2026-10-16',type:'pix',kind:'credit',description:'Crédito',amount:money(1200),done:false}
+  ];
+  const cash=cashTimeline(m,{cash:money(3000),card:0});
+  assert.equal(cash.shortfall,money(750));
+  assert.equal(cash.shortfallDate,'2026-10-14');
+  assert.equal(cash.final,money(450));
+  assert.equal(cash.safeBeforeNewSpending,0);
+});
+test('V7: posições anteriores conciliam lançamentos mesmo após edição de outros registros',async()=>{
+  const {reconciliationStatus}=await import('../logic.js');
+  const m=create();
+  m.snapshots=[record('antes','2026-09-27T10:00',12000,0),record('depois','2026-09-29T12:00',11500,0)];
+  const f={id:'f',type:'pix',kind:'debit',description:'Pix',date:'2026-09-28',amount:money(500),done:true,doneAt:'2026-09-28T10:00',snapshotCountAtDone:1};
+  m.future=[f];
+  assert.equal(position(m).cash,money(11500));
+  assert.equal(reconciliationStatus(m,f),'conciliado');
+  m.snapshots.push(record('retroativo','2026-09-26T09:00',12000,0));
+  assert.equal(position(m).cash,money(11500),'posição anterior retroativa não causa duplo desconto');
+  m.snapshots=m.snapshots.filter(s=>s.id!=='depois');
+  assert.equal(position(m).cash,money(11500),'lançamento fica provisório sem a posição que o conciliava');
+  assert.equal(reconciliationStatus(m,f),'provisorio');
+});
+test('V7: margem congelada na atualização não muda ao cadastrar novas previsões',async()=>{
+  const {planAtSnapshot}=await import('../logic.js');
+  const m=create();
+  const first=record('primeiro','2026-09-27T12:00',12000,500);
+  m.snapshots.push(first);
+  first.metrics=planAtSnapshot(m,first);
+  const original=first.metrics.free;
+  m.future.push({id:'nova',date:'2026-10-23',type:'pix',kind:'debit',description:'Nova',amount:money(1200),done:false});
+  assert.equal(first.metrics.free,original,'valor histórico preservado');
+  assert.notEqual(planAtSnapshot(m,first).free,original,'o recálculo com previsão nova seria retrospectivo');
+  assert.equal(validateState({version:3,months:{'2026-10':m}}),true);
+});
+test('V7: cartão pago não é despesa nova, nem indicador de descoberto',async()=>{
+  const {cashTimeline}=await import('../logic.js');
+  const m=create();
+  m.snapshots=[record('compra','2026-10-04T09:00',12000,3000),record('pago','2026-10-05T09:00',9000,0)];
+  assert.equal(spentSinceStart(m,position(m)),money(3000));
+  assert.equal(cashTimeline(m,position(m)).current,money(9000));
+});

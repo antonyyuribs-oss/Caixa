@@ -2,6 +2,7 @@ import {
   STORAGE_KEY, PREVIOUS_STORAGE_KEY, LEGACY_STORAGE_KEY, monthKey, shiftMonth, monthLabel, financialPeriod, periodLabel, dayIndex, inFinancialMonth, weekOfDate, rangeLabel,
   centsFromInput, brl, inputAmount, nowLocalInput, defaultGoals, newMonth,
   orderedSnapshots, position, openCash, spentSinceStart, pendingFuture, calculatePlan, freeForNewSpending,
+  cashTimeline, availableBeforeCredits, planAtSnapshot, reconciliationStatus,
   effectiveWeek, pastWeekPosition, actualWeekSpent, validateState, validatePreviousState, migratePreviousState, validateLegacyState, migrateLegacyState
 } from './logic.js';
 
@@ -36,9 +37,10 @@ let view = 'dashboard';
 let chosenMonth = monthKey();
 let chosenWeek = weekOfDate(nowLocalInput());
 let historyWeek = -1;
-let historyChart = 'spending';
+let historyChart = 'margin';
 let toastHandle = 0;
 const THEME_KEY='rastro-c-appearance-v1';
+const BACKUP_KEY='rastro-c-last-export-v1';
 const THEMES=[
   {id:'graphite',name:'Grafite',group:'escuros',swatches:['#10141b','#202836','#70d1af']},
   {id:'navy',name:'Marinho',group:'escuros',swatches:['#101c30','#1e3250','#83b9eb']},
@@ -90,7 +92,8 @@ function render() {
   main.innerHTML = !month ? renderMissing() : view === 'dashboard' ? renderDashboard(month) : view === 'goals' ? renderGoals(month) : renderHistory(month);
 }
 function renderMissing() {
-  return `<div class="space"></div><div class="eyebrow">COMECE PELO PLANEJAMENTO</div><div class="space"></div><div class="empty"><div class="empty-icon">◎</div><h2>Seu caixa começa aqui</h2><p>Defina o orçamento do mês, o saldo inicial da conta e as metas das quatro semanas. Depois, atualize apenas a posição do cartão e do caixa. Cada mês financeiro começa no dia 26 e termina no dia 25.</p>${btn('open-setup','Criar planejamento mensal','primary')}</div><div class="space"></div><p class="center fine">Sem cadastro e sem conexão bancária. Seus registros ficam neste navegador.</p>`;
+  const preceding=state.months[shiftMonth(chosenMonth,-1)];
+  return `<div class="space"></div><div class="eyebrow">COMECE PELO PLANEJAMENTO</div><div class="space"></div><div class="empty"><div class="empty-icon">◎</div><h2>Seu caixa começa aqui</h2><p>Defina o orçamento do mês, o saldo inicial da conta e as metas das quatro semanas. Depois, atualize apenas a posição do cartão e do caixa. Cada mês financeiro começa no dia 26 e termina no dia 25.</p>${btn('open-setup','Criar planejamento mensal','primary')}${preceding?`<div class="action" style="margin-top:11px">${btn('start-from-previous','Usar o mês anterior como referência','secondary wide')}</div>`:''}</div><div class="space"></div><p class="center fine">Sem cadastro e sem conexão bancária. Seus registros ficam neste navegador.</p>`;
 }
 function activePlan(month) {
   const pos = position(month);
@@ -114,7 +117,11 @@ function renderDashboard(month) {
   const free = available === null ? null : past ? available : freeForNewSpending(visible,chosenWeek);
   const pendingCreditsThisWeek = month.future.some(f => !f.done && f.kind === 'credit' && weekOfDate(f.date) === chosenWeek);
   const caption = past ? `Posição registrada na semana ${chosenWeek + 1}` : chosenWeek === active ? (pendingCreditsThisWeek ? 'Livre projetado para esta semana' : 'Livre para novos gastos nesta semana') : `Livre previsto para a semana ${chosenWeek + 1}`;
-  const status = visible.rawPool < 0 || visible.uncoveredFuture > 0 ? badge('Caixa insuficiente', 'bad') : difference === null ? badge('Compromissos cobertos', 'good') : difference < 0 ? badge('Meta ajustada', 'warn') : badge('Dentro do planejamento', 'good');
+  const timeline=cashTimeline(month,pos);
+  const releaseNow = !past && chosenWeek===active ? availableBeforeCredits(month,pos,active) : null;
+  const comparable=orderedSnapshots(month).filter(s=>s.metrics&&s.metrics.week===chosenWeek);
+  const movement=comparable.length>=2&&chosenWeek===active?comparable.at(-1).metrics.free-comparable.at(-2).metrics.free:null;
+  const status = visible.rawPool < 0 || timeline.shortfall > 0 ? badge('Caixa insuficiente', 'bad') : difference === null ? badge('Compromissos cobertos', 'good') : difference < 0 ? badge('Meta ajustada', 'warn') : badge('Dentro do planejamento', 'good');
   // O Painel mostra exclusivamente o cabeçalho semanal e o quadro principal.
   // Posição bancária e ações de registro ficam em Histórico; planejamento e previsões, em Metas.
   return `
@@ -124,6 +131,8 @@ function renderDashboard(month) {
       <div class="eyebrow">${caption}</div>
       <div class="hero-value money">${free === null ? '—' : fmt(free)}</div>
       <div class="hero-note">${past && !historical ? 'Nenhuma atualização registrada nessa semana' : adjustedGoal === null ? 'Meta recalculada: falta posição da semana anterior' : `Meta recalculada (após previsões): ${fmt(adjustedGoal)}`}</div>
+      ${releaseNow!==null && releaseNow<free ? `<div class="hero-availability"><span>Antes dos créditos previstos</span><strong class="money">${fmt(releaseNow)}</strong></div>`:''}
+      ${movement!==null?`<div class="hero-movement">Desde a atualização anterior desta semana: <b class="money ${movement<0?'warn-text':'accent'}">${signed(movement)}</b></div>`:''}
       <div class="hero-foot"><div><span class="foot-label">Original: ${fmt(original)} · Ajuste</span><b class="money ${difference < 0 ? 'warn-text' : difference > 0 ? 'accent' : ''}">${difference === null ? '—' : signed(difference)}</b></div><div><span class="foot-label">Situação</span>${status}</div></div>
     </section>
   `;
@@ -143,6 +152,7 @@ function renderForecastSummary(month) {
 function renderFinancialPosition(month) {
   const { pos, plan, active } = activePlan(month);
   const coverageMargin = pos.cash - pos.card;
+  const timeline=cashTimeline(month,pos);
   const covered = coverageMargin >= 0;
   const lastText = pos.at ? `Atualizado ${labelDay(pos.at)}` : 'Ainda não há atualização bancária neste mês';
   return `${heading('Posição financeira','Valores atuais')}
@@ -150,6 +160,8 @@ function renderFinancialPosition(month) {
       <div class="indicator"><span class="indicator-label">Dinheiro na conta</span><span class="indicator-value money">${fmt(pos.cash)}</span></div>
       <div class="indicator"><span class="indicator-label">Fatura em aberto</span><span class="indicator-value money">${fmt(pos.card)}</span></div>
       <div class="indicator"><div><span class="indicator-label">Caixa após a fatura</span><span class="tiny">Saldo após descontar a fatura</span></div><span class="indicator-value money ${coverageMargin < 0 ? 'bad-text' : 'accent'}">${fmt(coverageMargin)}</span></div>
+      <div class="indicator"><span class="indicator-label">Caixa projetado após lançamentos pendentes</span><b class="indicator-value money ${timeline.final<0?'bad-text':'accent'}">${fmt(timeline.final)}</b></div>
+      <div class="indicator"><div><span class="indicator-label">Disponível antes de créditos futuros</span><span class="tiny">Após proteger todos os pagamentos previstos</span></div><b class="indicator-value money">${fmt(Math.max(0,Math.min(timeline.safeBeforeNewSpending,plan.budgetLeft)))}</b></div>
       <div class="rule"></div>
       <div class="spread"><div><span class="small">Cobertura da fatura</span><p class="fine">${covered ? 'Saldo suficiente para pagar a fatura atual' : 'O saldo atual não cobre a fatura'}</p></div>${badge(covered ? 'Coberta' : 'Insuficiente', covered ? 'good' : 'bad')}</div>
     </div>
@@ -157,8 +169,8 @@ function renderFinancialPosition(month) {
     <p class="fine center" style="margin-top:9px">${lastText}</p>
     ${!orderedSnapshots(month).length ? '<div class="notice">Para acompanhar os gastos e a fatura, registre sua primeira posição bancária.</div>' : ''}
     ${plan.insufficient > 0 ? `<div class="notice danger">Faltam ${fmt(plan.insufficient)} para cobrir a posição do cartão e cumprir o caixa.</div>` : ''}
-    ${plan.uncoveredFuture > 0 ? `<div class="notice danger">Há ${fmt(plan.uncoveredFuture)} em compromissos futuros sem cobertura no planejamento.</div>` : ''}
-    ${plan.income.slice(active).some(x => x > 0) ? '<div class="notice">A projeção inclui créditos que ainda não foram recebidos. Verifique a entrada antes de utilizar esses valores.</div>' : ''}`;
+    ${timeline.shortfall > 0 ? `<div class="notice danger">Faltam ${fmt(timeline.shortfall)} para cobrir compromissos previstos${timeline.shortfallDate?` até ${timeline.shortfallDate.slice(8,10)}/${timeline.shortfallDate.slice(5,7)}`:''}, mesmo que o saldo final fique positivo.</div>` : ''}
+    ${plan.income.some(x => x > 0) ? '<div class="notice">O saldo projetado inclui créditos ainda não recebidos. A disponibilidade imediata não depende dessas entradas.</div>' : ''}`;
 }
 function renderGoals(month) {
   const { pos, active, plan } = activePlan(month);
@@ -167,22 +179,23 @@ function renderGoals(month) {
     <div class="spread"><div><div class="eyebrow">PLANEJAMENTO E PREVISÕES</div><h1 style="margin-top:8px">Metas</h1></div>${btn('open-setup','Editar','secondary compact')}</div>
     <div class="space"></div>
     <div class="card soft"><span class="small">Orçamento total</span><div class="money" style="font-size:32px;font-weight:750;margin-top:7px;letter-spacing:-.05em">${fmt(month.budget)}</div><p class="fine" style="margin-top:10px">Meta inicial fixa. Recalcular não altera o planejamento original.</p></div>
+    <div class="notice">Defina metas originais realistas: distribua o orçamento entre as quatro semanas e cadastre compromissos conhecidos antes de gastar. O recálculo preserva as metas originais para comparação.</div>
     ${heading('Metas por semana','Original × ajustada')}
     <div class="goal-grid">${month.goals.map((value, i) => {
       const historical = i < active ? pastWeekPosition(month, i) : null;
       const adjusted = i < active ? historical ? calculatePlan(month, historical, i).available[i] : null : plan.available[i];
       const free = i < active ? null : freeForNewSpending(plan,i);
       const reserved = i < active ? 0 : plan.commitments[i];
-      return `<button type="button" class="goal-tile ${i===active?'selected':''} editable-tile" data-action="edit-goal" data-week="${i}" aria-label="Editar meta original da semana ${i+1}"><span class="eyebrow">Semana ${i+1} · ${rangeLabel(month.key,i)}</span><div class="amount money">${fmt(value)}</div><div class="compare">${adjusted === null ? 'Sem registro' : `Recalculada: ${fmt(adjusted)}`}${reserved>0?`<br>Futuros: ${fmt(reserved)}<br><strong>Livre: ${fmt(free)}</strong>`:''}</div><span class="tap-hint">Toque para editar ↗</span></button>`;
+      return `<button type="button" class="goal-tile ${i===active?'selected':''} editable-tile" data-action="edit-goal" data-week="${i}" aria-label="Editar meta original da semana ${i+1}"><span class="eyebrow">Semana ${i+1} · ${rangeLabel(month.key,i)}</span><div class="amount money">${fmt(value)}</div><div class="compare">${adjusted === null ? 'Sem registro' : `Recalculada: ${fmt(adjusted)}`}${reserved>0?`<br>Vencimentos: ${fmt(reserved)}<br><strong>Livre: ${fmt(free)}</strong>`:''}</div><span class="tap-hint">Toque para editar ↗</span></button>`;
     }).join('')}</div>
     ${renderForecastSummary(month)}
     ${heading('Lançamentos',`${month.future.length} registro(s) · ${commitments.length} previsto(s)`)}
     <div class="card">
       <div class="spread"><p class="hint" style="max-width:270px">Pix, cartão e créditos. Marque cada lançamento como realizado quando acontecer.</p>${btn('open-future','＋ Adicionar','secondary compact')}</div>
       ${month.future.length ? `<div style="margin-top:8px">${[...month.future].sort((a,b)=>b.date.localeCompare(a.date) || (b.doneAt||'').localeCompare(a.doneAt||'')).map(item=>`
-        <div class="future-row ${item.done?'done':''}"><div class="icon">${item.kind==='credit'?'＋':item.type==='card'?'C':'P'}</div><div class="detail"><button type="button" class="record-main" data-action="edit-future" data-id="${esc(item.id)}" aria-label="Editar ${esc(item.description)}"><span class="spread"><strong class="record-name">${esc(item.description)}</strong><b class="money ${item.kind==='credit'?'accent':''}" style="white-space:nowrap;font-size:13px">${item.kind==='credit'?'+ ':'− '}${fmt(item.amount)}</b></span><span class="small record-date">${item.date.slice(8,10)}/${item.date.slice(5,7)} · ${item.kind==='credit'?'Crédito':item.type==='card'?'Cartão':'Pix'} · ${item.done?'Realizado'+(item.doneAt?' em '+item.doneAt.slice(8,10)+'/'+item.doneAt.slice(5,7):''):'Previsto'} <span class="edit-glyph">✎</span></span></button><div class="future-actions"><button class="icon-button" data-action="toggle-future" data-id="${esc(item.id)}">${item.done?'Voltar a previsto':'Marcar realizado'}</button><button class="icon-button" data-action="delete-future" data-id="${esc(item.id)}">Excluir</button></div></div></div>`).join('')}</div>` : '<p class="hint" style="margin-top:16px">Nenhum lançamento futuro. Você pode adicioná-los quando precisar.</p>'}
+        <div class="future-row ${item.done?'done':''}"><div class="icon">${item.kind==='credit'?'＋':item.type==='card'?'C':'P'}</div><div class="detail"><button type="button" class="record-main" data-action="edit-future" data-id="${esc(item.id)}" aria-label="Editar ${esc(item.description)}"><span class="spread"><strong class="record-name">${esc(item.description)}</strong><b class="money ${item.kind==='credit'?'accent':''}" style="white-space:nowrap;font-size:13px">${item.kind==='credit'?'+ ':'− '}${fmt(item.amount)}</b></span><span class="small record-date">${item.date.slice(8,10)}/${item.date.slice(5,7)} · ${item.kind==='credit'?'Crédito':item.type==='card'?'Cartão':'Pix'} · ${item.done?(reconciliationStatus(month,item)==='conciliado'?'Realizado · conciliado':'Realizado · provisório'):'Previsto'} <span class="edit-glyph">✎</span></span></button><div class="future-actions"><button class="icon-button" data-action="toggle-future" data-id="${esc(item.id)}">${item.done?'Voltar a previsto':'Marcar realizado'}</button><button class="icon-button" data-action="delete-future" data-id="${esc(item.id)}">Excluir</button></div></div></div>`).join('')}</div>` : '<p class="hint" style="margin-top:16px">Nenhum lançamento futuro. Você pode adicioná-los quando precisar.</p>'}
     </div>
-    <div class="notice">As saídas previstas são reservadas imediatamente e distribuídas entre as semanas restantes. <b>Marcar realizado</b> atualiza o caixa ou a fatura provisoriamente. Quando você atualizar a posição bancária depois, o saldo informado substitui o ajuste automático, evitando duplicidade.</div>
+    <div class="notice">As despesas futuras reduzem a margem imediatamente. <b>Realizado · provisório</b> já interfere no caixa ou na fatura; <b>Realizado · conciliado</b> está coberto por uma posição bancária posterior e não é contado novamente. Confira a data dos lançamentos ao editar.</div>
     ${month.migratedFromCalendar ? `<div class="notice">Dados da versão antiga preservados. Confira o saldo e a fatura do início do mês financeiro em Metas → Editar (${financialPeriod(month.key).start.slice(8,10)}/${financialPeriod(month.key).start.slice(5,7)}).</div>` : ''}
     ${heading('Aparência', 'Escolha seu tema')}
     <div class="card"><p class="hint" style="margin-bottom:14px">Cinco paletas. A alteração vale para todo o aplicativo e não muda seus registros.</p>
@@ -249,6 +262,39 @@ function renderWeeklyGraph(month) {
     <p class="fine" style="margin-top:14px">Se não há posição anterior suficiente para isolar uma semana, o realizado fica sem referência em vez de ser estimado.</p>
   </div>`;
 }
+function renderMarginGraph(month) {
+  const records=orderedSnapshots(month).filter(s=>s.metrics && Number.isSafeInteger(s.metrics.free));
+  if(!records.length)return `<div class="empty"><h2>Sem fotografias da margem ainda</h2><p>O gráfico começa com as próximas atualizações. Posições antigas não recebem valores reconstruídos artificialmente.</p></div>`;
+  const period=financialPeriod(month.key),W=390,H=238,left=57,right=14,top=22,bottom=32;
+  const values=records.map(s=>s.metrics.free);
+  const lowest=Math.min(0,...values),highest=Math.max(1,...values),range=Math.max(1,highest-lowest);
+  const x=at=>left+dayIndex(month.key,at)/Math.max(1,period.days-1)*(W-left-right);
+  const y=v=>H-bottom-(v-lowest)/range*(H-top-bottom);
+  const guide=Array.from({length:5},(_,i)=>lowest+(highest-lowest)*i/4);
+  const grouped=period.weeks.map((w,i)=>records.filter(s=>s.metrics.week===i));
+  return `<div class="graph" role="group" aria-label="Evolução da margem semanal por atualização">
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Margens registradas, com traços interrompidos entre semanas">
+      ${guide.map(v=>`<line class="gridline" x1="${left}" x2="${W-right}" y1="${y(v)}" y2="${y(v)}"/><text x="${left-7}" y="${y(v)+3}" text-anchor="end">${chartAmount(v)}</text>`).join('')}
+      ${period.weeks.slice(0,3).map(w=>`<line class="week-divider" x1="${x(w.end)}" x2="${x(w.end)}" y1="${top}" y2="${H-bottom}"/>`).join('')}
+      ${period.weeks.map(w=>`<text x="${x(w.start)}" y="${H-9}" text-anchor="start">S${w.index+1}</text>`).join('')}
+      ${grouped.map(series=>series.length>1?`<path class="series" d="${curvePath(series.map(s=>[x(s.at),y(s.metrics.free)]))}"/>`:'').join('')}
+      ${records.map(s=>`<circle class="plot-dot mint" cx="${x(s.at)}" cy="${y(s.metrics.free)}" r="4"><title>${esc(labelDay(s.at))}: ${fmt(s.metrics.free)}</title></circle>`).join('')}
+    </svg>
+    <p class="fine chart-help">Cada ponto é a margem preservada na atualização. Linhas não conectam semanas diferentes. Edições de posições são assinaladas no histórico.</p>
+  </div>`;
+}
+function historyDelta(records,index) {
+  const current=records[index],old=records[index+1];
+  if(!current?.metrics || !old?.metrics || current.metrics.week!==old.metrics.week)return null;
+  return current.metrics.free-old.metrics.free;
+}
+function backupReminder(month) {
+  if(month.snapshots.length+month.future.length<3)return '';
+  let last=0;
+  try{last=Number(localStorage.getItem(BACKUP_KEY)||0);}catch{}
+  if(last && Date.now()-last<7*86400000)return '';
+  return `<div class="notice">${last?'Mais de 7 dias desde o último backup deste navegador.':'Nenhum backup exportado neste navegador.'} Use <b>Exportar JSON</b> para preservar os registros.</div>`;
+}
 function renderHistory(month) {
   const records = orderedSnapshots(month).reverse();
   const filtered = historyWeek === -1 ? records : records.filter(s => weekOfDate(s.at) === historyWeek);
@@ -261,10 +307,11 @@ function renderHistory(month) {
     <div class="two-stats">${stat('Gasto líquido no mês',fmt(plan.spent))}</div>
     ${heading('Evolução financeira','Comparação baseada em posições registradas')}
     <div class="chart-switch" role="group" aria-label="Selecionar gráfico">
+      <button type="button" data-action="chart-view" data-chart="margin" aria-pressed="${historyChart==='margin'}" class="${historyChart==='margin'?'active':''}">Margem</button>
       <button type="button" data-action="chart-view" data-chart="spending" aria-pressed="${historyChart==='spending'}" class="${historyChart==='spending'?'active':''}">Gastos</button>
       <button type="button" data-action="chart-view" data-chart="cash" aria-pressed="${historyChart==='cash'}" class="${historyChart==='cash'?'active':''}">Conta × fatura</button>
     </div>
-    ${renderGraph(month,historyChart)}
+    ${historyChart==='margin'?renderMarginGraph(month):renderGraph(month,historyChart)}
     ${heading('Desempenho semanal','Meta × realizado')}
     ${renderWeeklyGraph(month)}
     ${heading('Posições registradas',`${records.length} atualização(ões)`)}
@@ -275,13 +322,18 @@ function renderHistory(month) {
       const spent = spentSinceStart(month,s);
       const selected = weekOfDate(s.at);
       const r = calculatePlan(month,position(month,s.at),selected);
+      const change=historyDelta(records,records.indexOf(s));
       return `<div class="history-item"><button type="button" class="history-main" data-action="edit-snapshot" data-id="${esc(s.id)}" aria-label="Editar posição de ${labelDay(s.at)}"><span class="spread"><span><strong>Semana ${selected+1}</strong><span class="meta" style="display:block">${labelDay(s.at)}${s.note?' · '+esc(s.note):''}</span></span><span class="edit-glyph">✎ Editar</span></span>
       <span class="row-data"><span class="muted">Saldo / cartão</span><b>${fmt(s.cash)} / ${fmt(s.card)}</b></span>
       <span class="row-data"><span class="muted">Gasto acumulado</span><b>${fmt(spent)}</b></span>
-      <span class="row-data"><span class="muted">Livre na semana</span><b class="accent">${fmt(r.available[selected] ?? 0)}</b></span></button><div class="record-bottom">${btn('delete-snapshot','Excluir registro','ghost compact',`data-id="${esc(s.id)}"`)}</div></div>`;
+      <span class="row-data"><span class="muted">Margem naquela atualização</span><b class="accent">${s.metrics?fmt(s.metrics.free):'Sem fotografia histórica'}</b></span>
+      ${s.metrics ? `<span class="row-data"><span class="muted">Disponível antes dos créditos</span><b>${fmt(s.metrics.safeNow)}</b></span>`:''}
+      ${change!==null?`<span class="row-data"><span class="muted">Desde a atualização anterior</span><b class="money ${change<0?'warn-text':'accent'}">${signed(change)}</b></span>`:''}
+      ${s.metrics?.edited ? '<span class="fine">Fotografia recalculada após edição</span>':''}</button><div class="record-bottom">${btn('delete-snapshot','Excluir registro','ghost compact',`data-id="${esc(s.id)}"`)}</div></div>`;
     }).join('')}</div>` : '<div class="empty"><h2>Nenhuma atualização</h2><p>Registre uma posição para visualizar a evolução nesta semana.</p></div>'}
+    ${backupReminder(month)}
     ${heading('Segurança dos dados')}
-    <div class="card"><p class="hint">Os dados ficam neste navegador e não são sincronizados com o GitHub. Exporte um arquivo para guardar ou migrar para outro aparelho.</p><div class="buttons" style="margin-top:16px">${btn('export','Exportar JSON','secondary')}<label class="secondary file-label">Importar JSON<input id="import-file" type="file" accept="application/json,.json"></label></div><button data-action="reset-month" class="subtle-link" style="color:var(--danger);margin-top:12px">Apagar este mês</button></div>
+    <div class="card"><p class="hint">Os dados ficam neste navegador, sem sincronização automática. Importe somente após conferir o resumo do arquivo. Faça backup semanal ou antes de atualizar o aplicativo.</p><div class="buttons" style="margin-top:16px">${btn('export','Exportar JSON','secondary')}<label class="secondary file-label">Importar JSON<input id="import-file" type="file" accept="application/json,.json"></label></div><button data-action="reset-month" class="subtle-link" style="color:var(--danger);margin-top:12px">Apagar este mês</button></div>
   `;
 }
 function modal(content, headingText) {
@@ -289,17 +341,21 @@ function modal(content, headingText) {
   modalRoot.querySelector('input:not([type="hidden"])')?.focus({preventScroll:true});
 }
 function closeModal() { modalRoot.innerHTML = ''; }
-function setupModal() {
+function setupModal(usePrevious=false) {
   const current = getMonth();
-  const budget = current?.budget ?? 1200000;
-  const goals = current?.goals || defaultGoals(budget);
+  const older=usePrevious&&!current?state.months[shiftMonth(chosenMonth,-1)]:null;
+  const lastPosition=older?position(older):null;
+  const budget = current?.budget ?? older?.budget ?? 1200000;
+  const goals = current?.goals || older?.goals || defaultGoals(budget);
   modal(`<form data-form="setup" class="form-grid" novalidate>
     <p class="hint">Período: <b>${periodLabel(chosenMonth)}</b>. Informe o saldo e a fatura do dia 26, início deste mês financeiro, além das metas originais.</p>
+    ${older?`<div class="notice">Valores copiados do mês anterior, cuja última posição é de ${esc(lastPosition.at?labelDay(lastPosition.at):'início do mês')}. <b>Confirme o saldo real e a fatura do novo dia 26</b> antes de salvar. Previsões antigas não serão replicadas.</div>`:''}
     ${input('budget','Orçamento mensal (R$)',inputAmount(budget))}
-    <div class="fieldrow">${input('startCash','Saldo inicial da conta',inputAmount(current?.startCash ?? budget))}${input('startCard','Fatura inicial',inputAmount(current?.startCard ?? 0))}</div>
+    <div class="fieldrow">${input('startCash','Saldo inicial da conta',inputAmount(current?.startCash ?? lastPosition?.cash ?? budget))}${input('startCard','Fatura inicial',inputAmount(current?.startCard ?? lastPosition?.card ?? 0))}</div>
     <div class="spread"><h3>Metas originais</h3>${btn('split-goals','Dividir igualmente','ghost compact')}</div>
     <div class="goal-grid">${goals.map((g,i)=>input(`goal${i}`,`Semana ${i+1} · ${rangeLabel(chosenMonth,i)}`,inputAmount(g))).join('')}</div>
     <p class="fine">A soma das quatro metas deve ser igual ao orçamento mensal. O saldo inicial é uma referência para acompanhar as alterações do caixa e da fatura.</p>
+    ${current?.future.length?`<div class="notice">Já existem ${current.future.filter(x=>!x.done).length} lançamentos futuros pendentes neste mês. Eles são reservados além das metas originais, sem necessidade de reduzi-las manualmente.</div>`:''}
     ${current?.snapshots.length ? '<div class="notice">Atenção: mudar o saldo ou a fatura inicial também altera os cálculos históricos.</div>' : ''}
     <div class="modal-bottom"><button class="primary wide" type="submit">${current?'Salvar planejamento':'Criar planejamento'}</button></div>
   </form>`, current ? 'Editar planejamento' : 'Planejamento inicial');
@@ -402,8 +458,28 @@ function submitUpdate(form) {
   if(!at || !inFinancialMonth(at,chosenMonth) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(at) || !Number.isFinite(Date.parse(at))) throw new Error('Selecione uma data válida dentro do mês financeiro aberto (26 a 25).');
   const cash=parseNonnegative(form,'cash');const card=parseNonnegative(form,'card');
   const note=(form.elements.note.value||'').trim().slice(0,100);
-  m.snapshots.push({id:id(),at,cash,card,note});
-  save();closeModal();chosenWeek=weekOfDate(at);render();notify('Posição registrada.');
+  const previous=orderedSnapshots(m).filter(item=>item.at<=at).at(-1);
+  const snap={id:id(),at,cash,card,note};
+  m.snapshots.push(snap);
+  snap.metrics=planAtSnapshot(m,snap);
+  save();closeModal();chosenWeek=weekOfDate(at);render();
+  updateFeedback(snap,previous);
+}
+function updateFeedback(current,previous) {
+  const metrics=current.metrics;
+  const previousMetrics=previous?.metrics;
+  const comparable=previousMetrics&&previousMetrics.week===metrics.week;
+  const difference=comparable?metrics.free-previousMetrics.free:null;
+  const changes=previous?{cash:current.cash-previous.cash,card:current.card-previous.card}:null;
+  modal(`<div class="stack" style="gap:14px">
+    <p class="hint">Posição de ${labelDay(current.at)} registrada. O resultado abaixo conserva os valores calculados no momento desta atualização.</p>
+    <div class="card soft"><span class="small">Disponível projetado · semana ${metrics.week+1}</span><div class="summary-large money accent">${fmt(metrics.free)}</div>
+      <p class="fine">Sem contar créditos ainda não recebidos: <b>${fmt(metrics.safeNow)}</b></p></div>
+    ${difference===null?'<div class="notice">Ainda não há duas atualizações comparáveis na mesma semana. A evolução da margem começa com a próxima.</div>':`<div class="indicator"><span class="indicator-label">Variação desde a atualização anterior</span><b class="indicator-value money ${difference<0?'warn-text':'accent'}">${signed(difference)}</b></div>`}
+    ${changes?`<div class="card"><div class="indicator"><span class="indicator-label">Variação do saldo bancário</span><b class="money">${signed(changes.cash)}</b></div><div class="indicator"><span class="indicator-label">Variação da fatura</span><b class="money">${signed(changes.card)}</b></div></div>`:''}
+    ${metrics.shortfall>0?`<div class="notice danger">Compromissos descobertos: ${fmt(metrics.shortfall)}. Verifique as datas de vencimento.</div>`:'<div class="notice good">Compromissos cadastrados cobertos na sequência prevista, desde que os créditos futuros sejam recebidos nas datas informadas.</div>'}
+    <div class="modal-bottom">${btn('close-modal','Voltar ao Histórico','primary wide')}</div>
+  </div>`,'Resultado da atualização');
 }
 function submitFuture(form) {
   const m=getMonth();if(!m)return;
@@ -424,8 +500,9 @@ function submitEditSnapshot(form) {
   const note=(form.elements.note.value||'').trim().slice(0,100);
   const backup={...original};
   Object.assign(original,{at,cash,card,note});
+  original.metrics={...planAtSnapshot(m,original),edited:true};
   if(!validateState(state)){Object.assign(original,backup);throw new Error('Os dados editados são inválidos.');}
-  save();closeModal();chosenWeek=weekOfDate(at);render();notify('Posição atualizada.');
+  save();closeModal();chosenWeek=weekOfDate(at);render();notify('Posição corrigida; a fotografia editada foi recalculada.');
 }
 function submitEditFuture(form) {
   const m=getMonth(); const original=m?.future.find(f=>f.id===form.elements.recordId.value); if(!original)throw new Error('Lançamento não localizado.');
@@ -460,7 +537,8 @@ function exportData() {
   const a=document.createElement('a');a.href=url;a.download=`rastro-c-backup-${chosenMonth}.json`;
   document.body.append(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),500);
-  notify('Backup exportado.');
+  try{localStorage.setItem(BACKUP_KEY,String(Date.now()));}catch{}
+  render();notify('Backup exportado.');
 }
 async function importData(file) {
   if(!file)return;
@@ -469,8 +547,11 @@ async function importData(file) {
   const legacy = validateLegacyState(parsed);
   const previous=validatePreviousState(parsed);
   if(!legacy && !previous && !validateState(parsed)) throw new Error('O arquivo não contém um backup válido deste aplicativo.');
-  if(!confirm('Importar substituirá todos os dados deste navegador. Continuar?'))return;
-  state = legacy ? migrateLegacyState(parsed) : previous ? migratePreviousState(parsed) : parsed;
+  const incoming=legacy?migrateLegacyState(parsed):previous?migratePreviousState(parsed):parsed;
+  const count=(data)=>Object.values(data.months).reduce((acc,m)=>({snapshots:acc.snapshots+m.snapshots.length,entries:acc.entries+m.future.length}),{snapshots:0,entries:0});
+  const n=count(incoming),old=count(state);
+  if(!confirm(`CONFIRMAR IMPORTAÇÃO\n\nArquivo: ${Object.keys(incoming.months).length} mês(es), ${n.snapshots} posição(ões), ${n.entries} lançamento(s).\n\nSerão SUBSTITUÍDOS neste navegador: ${old.snapshots} posição(ões), ${old.entries} lançamento(s).\n\nExporte um backup antes de prosseguir. Continuar?`))return;
+  state=incoming;
   save();
   if(!state.months[chosenMonth])chosenMonth=Object.keys(state.months).sort().at(-1)||monthKey();
   chosenWeek=chosenMonth===monthKey()?weekOfDate(nowLocalInput()):0;
@@ -488,8 +569,9 @@ document.addEventListener('click',event=>{
   switch(action){
     case 'select-week': chosenWeek=Number(target.dataset.week);render();break;
     case 'select-history-week': historyWeek=Number(target.dataset.week);render();break;
-    case 'chart-view':historyChart=target.dataset.chart==='cash'?'cash':'spending';render();break;
+    case 'chart-view':historyChart=['cash','margin','spending'].includes(target.dataset.chart)?target.dataset.chart:'margin';render();break;
     case 'open-setup':setupModal();break;
+    case 'start-from-previous':setupModal(true);break;
     case 'edit-goal':{
       setupModal();
       modalRoot.querySelector(`[name="goal${Number(target.dataset.week)}"]`)?.focus({preventScroll:true});

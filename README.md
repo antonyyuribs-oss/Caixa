@@ -1,37 +1,51 @@
-# RASTRO - C — V6
+# RASTRO - C · V7 — Correção de trajetória financeira
 
-Aplicativo web estático, em português, pronto para GitHub Pages. Nenhuma instalação de servidor ou conta bancária é necessária.
+App financeiro estático em português para GitHub Pages. O objetivo continua sendo **fechar o mês financeiro (26 a 25) com o caixa livre planejado em zero** e corrigir a trajetória dos gastos durante as quatro semanas, sem categorias excessivas.
 
-## Atualizar no GitHub Pages
+## Atualizar a partir da V6
 
-1. Faça **Histórico → Exportar JSON** no aplicativo atual e guarde o arquivo em local seguro.
-2. Descompacte o ZIP e envie os arquivos **do interior da pasta** para a raiz do repositório `Caixa`, substituindo os arquivos existentes. Inclua o novo arquivo `themes.css`.
-3. No GitHub, confirme em Settings → Pages que a publicação usa `main` e `/(root)`.
-4. Reabra o aplicativo pelo mesmo endereço. Se o tema ou a tela não atualizar imediatamente, feche o app da tela inicial do iPhone e abra novamente; se necessário, reabra pelo Safari.
+1. No aplicativo atual, abra **Histórico → Exportar JSON** e guarde uma cópia fora do aparelho.
+2. Envie os arquivos deste ZIP para a **raiz** do repositório `Caixa` no GitHub, substituindo os anteriores (inclusive `app.js`, `logic.js`, `styles.css`, `themes.css`, `service-worker.js`).
+3. Aguarde a atualização do GitHub Pages e reabra pelo **mesmo endereço** no iPhone. Caso a versão antiga apareça, feche e abra o atalho novamente ou abra no Safari para atualizar o cache.
+4. Os registros financeiros permanecem no mesmo armazenamento do navegador (`caixa-semanal-v3`) e o mesmo esquema de backup JSON (`version:3`). Não é necessário importar o backup se os dados continuarem visíveis. Nunca apague o atalho e o armazenamento antes de guardar o backup.
 
-**Não apague os dados do navegador nem desinstale o aplicativo antes de ter um backup.** Os dados financeiros continuam sob a mesma chave (`caixa-semanal-v3`) e mantêm o mesmo formato JSON da versão anterior; não é preciso importar outra vez se usar o mesmo navegador e endereço. O tema visual fica guardado neste aparelho, separadamente dos dados financeiros.
+## Novidades da V7
 
-## O que mudou na V6
+### 1. Resultado de cada atualização
+Após **Histórico → Atualizar posição**, o app apresenta a margem projetada da semana, a disponibilidade sem créditos ainda não recebidos e, quando houver duas fotografias comparáveis **na mesma semana**, a variação desde a atualização anterior. Mostra também as mudanças no saldo bancário e na fatura. As fotografias ficam salvas no novo campo **opcional** `metrics` de cada posição, sem mudar a versão do JSON.
 
-- **Todos os registros tocáveis:** em **Metas**, toque na descrição de qualquer lançamento (previsto ou realizado) para editar descrição, valor, tipo e data; os realizados também permitem corrigir data/hora de realização. O botão **Marcar realizado / Voltar a previsto** foi preservado.
-- **Histórico:** toque em qualquer posição de saldo e fatura para editar seus valores, data e observação. Os dados são **substituídos**, não duplicados. Para excluir, use o botão próprio.
-- **Metas:** toque no quadro de uma semana para abrir a edição do planejamento original (a soma das quatro semanas deve corresponder ao orçamento mensal).
-- **Ordem dos lançamentos:** de data mais recente para mais antiga, incluindo os realizados.
-- **Cinco temas visuais em Metas → Aparência:** Nude, Rosé, Grafite, Marinho e Oliva. São alterações somente de cores; o funcionamento financeiro é o mesmo.
-- **Histórico com gráficos ampliados:** escolha entre **Gastos** (acumulado x meta original) e **Conta × fatura**. Há também barras de comparação semanal. Sem posição anterior suficiente, o gasto semanal fica identificado como **sem referência**, em vez de estimado.
+Posições anteriores à V7 **não ganham margens históricas estimadas**. A comparação e o gráfico específico começam conforme você fizer novas atualizações. Ao editar uma posição, a fotografia dessa posição é recalculada e assinalada como editada; as demais fotografias permanecem guardadas.
 
-## Regras financeiras mantidas
+### 2. Dinheiro de hoje × projeção
+O Painel preserva apenas o cabeçalho, as quatro semanas e o quadro principal. Quando créditos futuros alteram o limite da semana selecionada, um indicador secundário distingue o valor que pode ser usado **antes** de esses créditos serem recebidos. Em Histórico → Posição financeira, veja o saldo líquido atual, o projetado após pendências e o mínimo disponível na sequência de vencimentos. Isso considera as datas: um crédito de sexta não pode cobrir uma conta vencendo na quarta.
 
-- O mês financeiro vai do **dia 26 ao dia 25** do mês seguinte; suas quatro semanas se ajustam à duração do período.
-- A meta original de cada semana fica preservada; a meta livre é recalculada com fatura, caixa e previsões.
-- Despesas futuras são reservadas já no momento do lançamento; créditos futuros são considerados a partir de sua semana de previsão.
-- Pagamentos por Pix reduzem o caixa. Compras no cartão aumentam a fatura. O pagamento posterior do cartão não é contado de novo como gasto.
-- Ao marcar um lançamento realizado, ele afeta provisoriamente o caixa ou cartão. Quando você informar uma posição bancária posterior, os saldos registrados prevalecem, evitando duplicidade.
+**Importante:** o cálculo protege os vencimentos cadastrados e preserva a alocação para as semanas seguintes. Lançamentos não cadastrados, valores que mudaram ou uma fatura desatualizada podem alterar a disponibilidade real.
 
-## Backup, privacidade e implantação
+### 3. Conciliação de realizados
+Cada lançamento em Metas agora distingue **Previsto**, **Realizado · provisório** (ajusta saldo/fatura no app) e **Realizado · conciliado** (posição bancária posterior passou a valer). Isso evita recontar um pagamento após informar o saldo do banco e melhora o comportamento quando posições são editadas, removidas ou registradas retroativamente. **Marcar realizado / Voltar a previsto** continuam disponíveis.
 
-Os dados permanecem no armazenamento local do navegador. O GitHub Pages hospeda o código, **não o seu extrato bancário**. Histórico → Exportar JSON cria um backup que você pode importar mais tarde. Importar substitui todo o conteúdo existente naquele navegador.
+### 4. Planejamento semanal preservado
+As metas originais são editáveis e mantidas como referência. A página Metas orienta cadastrar obrigações conhecidas antes de iniciar e evidencia previsões pendentes. Uma transferência para investimentos continua sendo apenas **uma saída Pix**, como definido no projeto.
 
-Arquivos principais: `index.html`, `app.js`, `logic.js`, `styles.css`, `themes.css`, `service-worker.js`, `manifest.webmanifest` e ícones.
+### 5. Histórico das margens
+O Histórico oferece três gráficos: **Margem**, **Gastos** e **Conta × fatura**, além das barras por semana. O novo gráfico de margem é formado somente por posições que tenham a fotografia V7; ele não une com uma linha semanas diferentes. A lista das posições mostra essa margem registrada e, quando comparável, a variação desde a atualização anterior.
 
-Para testar os cálculos com Node.js (opcional): `npm test`.
+### 6. Backup e continuidade
+Histórico: lembrete de backup quando há registros sem backup exportado ou quando passam sete dias da última exportação (contador no próprio navegador). Antes de importar, o app informa quantos meses, posições e lançamentos entrarão e quantos serão substituídos.
+
+Ao abrir um mês ainda não criado, pode-se usar a **última posição do mês anterior como referência inicial**. É necessário **confirmar manualmente o saldo real e a fatura do dia 26**. Obrigações antigas não são copiadas automaticamente, para evitar repetir pagamentos sem autorização.
+
+## Arquivos
+
+- `index.html`: tela inicial e navegação.
+- `app.js`: interface, formulário, gráficos e backups.
+- `logic.js`: motor financeiro (valores em centavos).
+- `styles.css` e `themes.css`: layout e cinco paletas de cores.
+- `manifest.webmanifest`, `service-worker.js`, `.nojekyll`, ícones: instalação e GitHub Pages.
+- `tests/`: testes financeiros e teste estrutural de navegação.
+
+Para testar com Node.js: `npm test`.
+
+## Limitações
+
+Dados ficam apenas no armazenamento local deste navegador; **não são sincronizados** com o GitHub nem com o banco. O histórico anterior à V7 não contém as novas fotografias de margem. A projeção não garante saldo: depende dos valores, datas e registros informados pelo usuário. Revise regularmente fatura e conta bancária.

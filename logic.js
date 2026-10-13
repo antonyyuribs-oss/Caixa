@@ -116,8 +116,12 @@ export function position(month,asOf=null) {
   const mark=base.at||`${financialPeriod(month.key).start}T00:00`;
   for(const f of month.future) {
     if(!f.done || !f.doneAt || (asOf && f.doneAt>asOf))continue;
-    if(f.snapshotCountAtDone!==undefined && records.length>f.snapshotCountAtDone)continue;
-    if(f.doneAt<mark || (f.doneAt===mark && f.snapshotCountAtDone===undefined))continue;
+    // Comparar datas, não a contagem global de posições: registros editados,
+    // excluídos ou lançados retroativamente não podem duplicar movimentos.
+    if(f.doneAt<mark)continue;
+    // Quando um registro e a posição têm o mesmo minuto, somente o lançamento
+    // feito DEPOIS daquela posição pode produzir um ajuste provisório.
+    if(f.doneAt===mark && (f.snapshotCountAtDone===undefined || records.length>f.snapshotCountAtDone))continue;
     if((f.kind||'debit')==='credit')pos.cash+=f.amount;
     else if(f.type==='card')pos.card+=f.amount;
     else pos.cash-=f.amount;
@@ -127,6 +131,57 @@ export function position(month,asOf=null) {
 export function openCash(month,pos) {return pos.cash-pos.card;}
 export function spentSinceStart(month,pos) {return (month.startCash-month.startCard)-openCash(month,pos);}
 export function pendingFuture(month) {return month.future.filter(item=>!item.done);}
+// A posição bancária mais recente absorve um lançamento já realizado.
+// "Provisório" significa que ele ainda afeta o cálculo sem confirmação
+// por uma posição posterior; não equivale a ausência de pagamento.
+export function reconciliationStatus(month, entry) {
+  if(!entry.done || !entry.doneAt)return 'previsto';
+  const snapshots=orderedSnapshots(month);
+  const later=snapshots.filter(s=>s.at>entry.doneAt);
+  if(later.length)return 'conciliado';
+  const equal=snapshots.filter(s=>s.at===entry.doneAt);
+  if(equal.length && (entry.snapshotCountAtDone===undefined || snapshots.filter(s=>s.at<=entry.doneAt).length>entry.snapshotCountAtDone))return 'conciliado';
+  return 'provisorio';
+}
+// Cobertura cronológica: dinheiro futuro não cobre conta que vence antes.
+export function cashTimeline(month,pos) {
+  const current=openCash(month,pos);
+  let running=current, minimum=current, shortfallDate=null;
+  const events=new Map();
+  for(const item of pendingFuture(month)){
+    if(!inFinancialMonth(item.date,month.key))continue;
+    const delta=item.kind==='credit'?item.amount:-item.amount;
+    events.set(item.date,(events.get(item.date)||0)+delta);
+  }
+  const steps=[];
+  for(const date of [...events.keys()].sort()) {
+    running+=events.get(date);
+    steps.push({date,balance:running});
+    if(running<minimum){minimum=running;shortfallDate=date;}
+  }
+  return {current,minimum,final:running,safeBeforeNewSpending:Math.max(0,minimum),
+    shortfall:Math.max(0,-minimum),shortfallDate,steps};
+}
+// Para gastar ANTES de receber créditos futuros, excluí-los da alocação.
+// A quarta semana e os vencimentos pendentes continuam protegidos.
+export function availableBeforeCredits(month,pos,activeWeek) {
+  const withoutFutureIncome={...month,future:month.future.filter(f=>f.kind!=='credit'||f.done)};
+  const plan=calculatePlan(withoutFutureIncome,pos,activeWeek);
+  return Math.max(0,Math.min(plan.available[activeWeek]??0,cashTimeline(month,pos).safeBeforeNewSpending));
+}
+// Uma fotografia fiel ao instante da atualização. Lançamentos realizados
+// mais tarde ainda eram previsões; novas posições não entram retroativamente.
+export function planAtSnapshot(month,snapshot) {
+  const historical={...month,
+    snapshots:orderedSnapshots(month).filter(s=>s.at<=snapshot.at),
+    future:month.future.map(f=>f.done&&f.doneAt>snapshot.at?{...f,done:false,doneAt:undefined}:f)};
+  const week=weekOfDate(snapshot.at),pos=position(historical,snapshot.at);
+  const plan=calculatePlan(historical,pos,week);
+  return {week,free:plan.available[week]??0,projected:plan.projectedPool,
+    safeNow:availableBeforeCredits(historical,pos,week),liquid:openCash(historical,pos),
+    shortfall:cashTimeline(historical,pos).shortfall};
+}
+
 export function pendingByWeek(month,kind='debit') {
   const pending=[0,0,0,0];
   for(const item of pendingFuture(month)) {
@@ -264,7 +319,9 @@ function validNumbers(month){return [month.budget,month.startCash,month.startCar
 function validEntries(month,acceptDate){
   if(!Array.isArray(month.snapshots)||!Array.isArray(month.future))return false;
   if(!month.snapshots.every(s=>s&&typeof s.id==='string'&&typeof s.at==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s.at)
-    &&validLocalTime(s.at)&&acceptDate(s.at)&&[s.cash,s.card].every(n=>Number.isSafeInteger(n)&&n>=0)))return false;
+    &&validLocalTime(s.at)&&acceptDate(s.at)&&[s.cash,s.card].every(n=>Number.isSafeInteger(n)&&n>=0)
+    &&(s.metrics===undefined || (s.metrics && [s.metrics.free,s.metrics.projected,s.metrics.safeNow,s.metrics.liquid,s.metrics.shortfall]
+      .every(n=>Number.isSafeInteger(n))&&Number.isInteger(s.metrics.week)&&s.metrics.week>=0&&s.metrics.week<=3))))return false;
   return month.future.every(f=>f&&typeof f.id==='string'&&typeof f.date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(f.date)
     &&acceptDate(f.date)&&/^(card|pix)$/.test(f.type)&&['debit','credit'].includes(f.kind||'debit')
     &&(f.kind!=='credit'||f.type==='pix')&&typeof f.description==='string'&&Number.isSafeInteger(f.amount)&&f.amount>0

@@ -1,4 +1,4 @@
-const CACHE = 'caixa-semanal-cache-v8-edit-themes-charts';
+const CACHE = 'rastro-c-cache-v9-decisions';
 const ASSETS = ['./','./index.html','./styles.css','./themes.css','./app.js','./logic.js','./manifest.webmanifest','./icon.svg','./icon-192.png','./icon-512.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));

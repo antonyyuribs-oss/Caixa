@@ -122,3 +122,14 @@ body{background:radial-gradient(ellipse 500px 360px at 50% -130px,var(--glow),tr
 :root[data-theme="nude"] .hero .hero-value,:root[data-theme="rose"] .hero .hero-value{color:var(--mint)}
 :root[data-theme="nude"] .pill.bad,:root[data-theme="rose"] .pill.bad{color:var(--danger)}
 @media (max-width:365px){.theme-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.chart-legend{gap:9px}}
+/* V7 — margens registradas, conciliação e retorno após cada atualização */
+.hero-availability{display:flex;justify-content:space-between;align-items:center;gap:12px;border:1px solid var(--hero-line);border-radius:12px;padding:11px 12px;color:var(--hero-muted);margin:14px 0 0;font-size:11px}
+.hero-availability strong{color:var(--mint);font-size:16px;white-space:nowrap}
+.hero-movement{font-size:11px;color:var(--hero-muted);margin-top:13px;line-height:1.5}
+.hero-movement b{font-size:13px;margin-left:3px}
+.summary-large{font-weight:800;font-size:34px;letter-spacing:-.045em;margin:8px 0 12px}
+.chart-switch{grid-template-columns:repeat(3,minmax(0,1fr))}
+.chart-switch button{font-size:11px;padding:12px 4px}
+.hero .hero-availability{background:var(--surface2);background:color-mix(in srgb,var(--surface2) 68%,transparent)}
+:root[data-theme="nude"] .hero-availability strong,:root[data-theme="rose"] .hero-availability strong{color:var(--txt)}
+@media(max-width:350px){.hero-availability{font-size:10px}.hero-availability strong{font-size:13px}}
