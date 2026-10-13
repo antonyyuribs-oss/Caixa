@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "Caixa — controle semanal",
-  "short_name": "Caixa",
+  "name": "RASTRO - C — controle semanal",
+  "short_name": "RASTRO - C",
   "description": "Controle do caixa semanal até o fechamento em zero.",
   "start_url": "./",
   "scope": "./",

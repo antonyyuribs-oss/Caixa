@@ -83,25 +83,19 @@ function renderDashboard(month) {
   const visible = past && historical ? calculatePlan(month, historical, chosenWeek) : plan;
   const available = past && !historical ? null : visible.available[chosenWeek];
   const original = month.goals[chosenWeek];
-  // O gasto já realizado na semana não é confundido com redução da meta.
-  // A meta ajustada total da semana = gasto atribuído a ela + saldo que ainda pode gastar.
+  // Só é possível comparar a meta total após conhecer a referência da semana anterior.
   const spentWeek = past
     ? (historical ? actualWeekSpent(month, chosenWeek) : null)
     : chosenWeek > active ? 0
     : (pos.at && weekOfDate(pos.at) === chosenWeek ? actualWeekSpent(month, chosenWeek) : 0);
   const adjustedGoal = available === null || spentWeek === null ? null : available + spentWeek;
   const difference = adjustedGoal === null ? null : adjustedGoal - original;
-  const futureItemsInWeek = past ? 0 : (visible.commitments[chosenWeek]||0);
   const free = available === null ? null : past ? available : freeForNewSpending(visible,chosenWeek);
-  const futureTotal = pendingFuture(month).filter(item=>(item.kind||'debit')==='debit').reduce((sum,item)=>sum+item.amount,0);
-  const futureCreditTotal = pendingFuture(month).filter(item=>item.kind==='credit').reduce((sum,item)=>sum+item.amount,0);
-  const covered = pos.cash >= pos.card;
-  const coverageMargin = pos.cash - pos.card;
-  const currentData = !orderedSnapshots(month).length;
-  const pendingCreditsThisWeek=month.future.some(f=>!f.done&&f.kind==='credit'&&weekOfDate(f.date)===chosenWeek);
+  const pendingCreditsThisWeek = month.future.some(f => !f.done && f.kind === 'credit' && weekOfDate(f.date) === chosenWeek);
   const caption = past ? `Posição registrada na semana ${chosenWeek + 1}` : chosenWeek === active ? (pendingCreditsThisWeek ? 'Livre projetado para esta semana' : 'Livre para novos gastos nesta semana') : `Livre previsto para a semana ${chosenWeek + 1}`;
-  const lastText = pos.at ? `Atualizado ${labelDay(pos.at)}` : 'Use “Atualizar posição” para registrar os gastos';
-  const gap = visible.rawPool < 0 || visible.uncoveredFuture > 0 ? badge('Caixa insuficiente', 'bad') : difference === null ? badge('Compromissos cobertos', 'good') : difference < 0 ? badge('Meta ajustada', 'warn') : badge('Dentro do planejamento', 'good');
+  const status = visible.rawPool < 0 || visible.uncoveredFuture > 0 ? badge('Caixa insuficiente', 'bad') : difference === null ? badge('Compromissos cobertos', 'good') : difference < 0 ? badge('Meta ajustada', 'warn') : badge('Dentro do planejamento', 'good');
+  // O Painel mostra exclusivamente o cabeçalho semanal e o quadro principal.
+  // Posição bancária e ações de registro ficam em Histórico; planejamento e previsões, em Metas.
   return `
     <div class="spread"><div class="eyebrow">CONTROLE SEMANAL</div>${badge('Fechamento em zero')}</div>
     ${weekTabs(chosenWeek, 'select-week')}
@@ -109,43 +103,47 @@ function renderDashboard(month) {
       <div class="eyebrow">${caption}</div>
       <div class="hero-value money">${free === null ? '—' : fmt(free)}</div>
       <div class="hero-note">${past && !historical ? 'Nenhuma atualização registrada nessa semana' : adjustedGoal === null ? 'Meta recalculada: falta posição da semana anterior' : `Meta recalculada (após previsões): ${fmt(adjustedGoal)}`}</div>
-      <div class="hero-foot"><div><span class="foot-label">Original: ${fmt(original)} · Ajuste</span><b class="money ${difference < 0 ? 'warn-text' : difference > 0 ? 'accent' : ''}">${difference === null ? '—' : signed(difference)}</b></div><div><span class="foot-label">Situação</span>${gap}</div></div>
+      <div class="hero-foot"><div><span class="foot-label">Original: ${fmt(original)} · Ajuste</span><b class="money ${difference < 0 ? 'warn-text' : difference > 0 ? 'accent' : ''}">${difference === null ? '—' : signed(difference)}</b></div><div><span class="foot-label">Situação</span>${status}</div></div>
     </section>
-    ${(futureTotal>0||futureCreditTotal>0)&&!past ? `<div class="card" style="margin-top:12px"><div class="indicator"><span class="indicator-label">Despesas previstas no mês</span><b class="indicator-value money">− ${fmt(futureTotal)}</b></div><div class="indicator"><span class="indicator-label">Créditos previstos no mês</span><b class="indicator-value money accent">+ ${fmt(futureCreditTotal)}</b></div><p class="fine">As saídas previstas são distribuídas desde já pelas semanas restantes. Créditos previstos entram na projeção a partir da semana de recebimento.</p></div>` : ''}
-    ${month.migratedFromCalendar ? `<div class="notice">Dados da versão antiga preservados. Confira em Metas → Editar se o saldo e a fatura iniciais correspondem a <b>${financialPeriod(month.key).start.slice(8,10)}/${financialPeriod(month.key).start.slice(5,7)}</b>, início deste mês financeiro. As posições foram redistribuídas conforme a data.</div>` : ''}
-    ${currentData ? '<div class="notice">Posição inicial registrada no planejamento. Para refletir os gastos do mês, atualize o saldo da conta e a fatura do cartão.</div>' : ''}
-    ${past && !historical ? '<div class="notice">Não há atualização nessa semana. O aplicativo não inventa valores históricos.</div>' : ''}
-    ${available !== null && spentWeek === null ? '<div class="notice">Sem posição bancária registrada na semana anterior, não é possível identificar quanto da fatura foi gasto especificamente nesta semana. O valor livre é calculado pela posição atual, mas a meta recalculada total e seu ajuste ficam sem comparação.</div>' : ''}
-    ${futureTotal > 0 ? `<div class="notice">Despesas futuras pendentes no mês: <b>${fmt(futureTotal)}</b>. O valor principal já foi reduzido pela reserva distribuída entre as semanas restantes.</div>` : ''}
-    ${visible.income.slice(active).some(x=>x>0) && !past ? '<div class="notice">O limite semanal considera créditos ainda previstos. Antes de gastar, confira se a entrada já ocorreu e se o saldo real está disponível.</div>' : ''}
-    ${visible.uncoveredFuture > 0 ? `<div class="notice danger">Há ${fmt(visible.uncoveredFuture)} em compromissos futuros sem cobertura no planejamento restante. Reveja os valores ou as metas.</div>` : ''}
-    ${heading('Posição financeira','Valores atuais')}
+  `;
+}
+function renderForecastSummary(month) {
+  const futures = pendingFuture(month);
+  const debit = futures.filter(item => (item.kind || 'debit') === 'debit').reduce((sum, item) => sum + item.amount, 0);
+  const credit = futures.filter(item => item.kind === 'credit').reduce((sum, item) => sum + item.amount, 0);
+  if (!debit && !credit) return '';
+  return `${heading('Previsão do mês', 'Valores ainda pendentes')}
+    <div class="card">
+      <div class="indicator"><span class="indicator-label">Despesas previstas</span><b class="indicator-value money">− ${fmt(debit)}</b></div>
+      <div class="indicator"><span class="indicator-label">Créditos previstos</span><b class="indicator-value money accent">+ ${fmt(credit)}</b></div>
+      <p class="fine">As despesas já reduzem a margem das semanas abertas. Os créditos entram na projeção a partir da semana de recebimento.</p>
+    </div>`;
+}
+function renderFinancialPosition(month) {
+  const { pos, plan, active } = activePlan(month);
+  const coverageMargin = pos.cash - pos.card;
+  const covered = coverageMargin >= 0;
+  const lastText = pos.at ? `Atualizado ${labelDay(pos.at)}` : 'Ainda não há atualização bancária neste mês';
+  return `${heading('Posição financeira','Valores atuais')}
     <div class="card">
       <div class="indicator"><span class="indicator-label">Dinheiro na conta</span><span class="indicator-value money">${fmt(pos.cash)}</span></div>
       <div class="indicator"><span class="indicator-label">Fatura em aberto</span><span class="indicator-value money">${fmt(pos.card)}</span></div>
-      <div class="indicator"><div><span class="indicator-label">Caixa depois da fatura</span><span class="tiny">Dinheiro reservado para pagar o cartão</span></div><span class="indicator-value money ${coverageMargin < 0 ? 'bad-text' : 'accent'}">${fmt(coverageMargin)}</span></div>
+      <div class="indicator"><div><span class="indicator-label">Caixa após a fatura</span><span class="tiny">Saldo após descontar a fatura</span></div><span class="indicator-value money ${coverageMargin < 0 ? 'bad-text' : 'accent'}">${fmt(coverageMargin)}</span></div>
       <div class="rule"></div>
-      <div class="spread"><div><span class="small">Cobertura da fatura</span><p class="fine">${covered ? 'Saldo suficiente para pagar o cartão atual' : 'O saldo atual não cobre a fatura'}</p></div>${badge(covered ? 'Coberta' : 'Insuficiente', covered ? 'good' : 'bad')}</div>
+      <div class="spread"><div><span class="small">Cobertura da fatura</span><p class="fine">${covered ? 'Saldo suficiente para pagar a fatura atual' : 'O saldo atual não cobre a fatura'}</p></div>${badge(covered ? 'Coberta' : 'Insuficiente', covered ? 'good' : 'bad')}</div>
     </div>
     <div class="action">${btn('open-update','＋  Atualizar posição','primary wide')}<div class="buttons" style="margin-top:10px">${btn('open-credit','＋ Registrar crédito recebido','secondary wide')}</div></div>
     <p class="fine center" style="margin-top:9px">${lastText}</p>
-    ${heading('Distribuição recalculada','Resta no mês')}
-    <div class="goal-grid">${[0,1,2,3].map(i => {
-      const isPast = i < active;
-      const pastPos = isPast ? pastWeekPosition(month, i) : null;
-      const value = isPast && pastPos ? calculatePlan(month, pastPos, i).available[i] : isPast ? null : freeForNewSpending(plan,i);
-      const reserved = isPast ? 0 : plan.commitments[i];
-      return `<button type="button" data-action="select-week" data-week="${i}" class="goal-tile ${chosenWeek===i?'selected':''}" style="color:var(--txt);text-align:left;cursor:pointer"><div class="eyebrow">Semana ${i+1} · Livre</div><div class="amount money">${value===null?'—':fmt(value)}</div><div class="compare">Original: ${fmt(month.goals[i])}${reserved>0?` · Pix/cartão previsto na semana: ${fmt(reserved)}`:''}</div></button>`;
-    }).join('')}</div>
-    <div class="space"></div><p class="hint">As metas originais permanecem fixas. Despesas futuras são abatidas de imediato e distribuídas entre as semanas abertas. Créditos futuros só entram na projeção a partir do recebimento previsto.</p>
-    ${plan.insufficient ? `<div class="notice danger">Faltam ${fmt(plan.insufficient)} para cobrir a posição atual do cartão e cumprir o caixa.</div>` : ''}
-  `;
+    ${!orderedSnapshots(month).length ? '<div class="notice">Para acompanhar os gastos e a fatura, registre sua primeira posição bancária.</div>' : ''}
+    ${plan.insufficient > 0 ? `<div class="notice danger">Faltam ${fmt(plan.insufficient)} para cobrir a posição do cartão e cumprir o caixa.</div>` : ''}
+    ${plan.uncoveredFuture > 0 ? `<div class="notice danger">Há ${fmt(plan.uncoveredFuture)} em compromissos futuros sem cobertura no planejamento.</div>` : ''}
+    ${plan.income.slice(active).some(x => x > 0) ? '<div class="notice">A projeção inclui créditos que ainda não foram recebidos. Verifique a entrada antes de utilizar esses valores.</div>' : ''}`;
 }
 function renderGoals(month) {
   const { pos, active, plan } = activePlan(month);
   const commitments = pendingFuture(month);
   return `
-    <div class="spread"><div><div class="eyebrow">PLANEJAMENTO DO MÊS</div><h1 style="margin-top:8px">Metas</h1></div>${btn('open-setup','Editar','secondary compact')}</div>
+    <div class="spread"><div><div class="eyebrow">PLANEJAMENTO E PREVISÕES</div><h1 style="margin-top:8px">Metas</h1></div>${btn('open-setup','Editar','secondary compact')}</div>
     <div class="space"></div>
     <div class="card soft"><span class="small">Orçamento total</span><div class="money" style="font-size:32px;font-weight:750;margin-top:7px;letter-spacing:-.05em">${fmt(month.budget)}</div><p class="fine" style="margin-top:10px">Meta inicial fixa. Recalcular não altera o planejamento original.</p></div>
     ${heading('Metas por semana','Original × ajustada')}
@@ -156,6 +154,7 @@ function renderGoals(month) {
       const reserved = i < active ? 0 : plan.commitments[i];
       return `<div class="goal-tile ${i===active?'selected':''}"><span class="eyebrow">Semana ${i+1} · ${rangeLabel(month.key,i)}</span><div class="amount money">${fmt(value)}</div><div class="compare">${adjusted === null ? 'Sem registro' : `Recalculada: ${fmt(adjusted)}`}${reserved>0?`<br>Futuros: ${fmt(reserved)}<br><strong>Livre: ${fmt(free)}</strong>`:''}</div></div>`;
     }).join('')}</div>
+    ${renderForecastSummary(month)}
     ${heading('Lançamentos',`${month.future.length} registro(s) · ${commitments.length} previsto(s)`)}
     <div class="card">
       <div class="spread"><p class="hint" style="max-width:270px">Pix, cartão e créditos. Marque cada lançamento como realizado quando acontecer.</p>${btn('open-future','＋ Adicionar','secondary compact')}</div>
@@ -163,6 +162,7 @@ function renderGoals(month) {
         <div class="future-row ${item.done?'done':''}"><div class="icon">${item.kind==='credit'?'＋':item.type==='card'?'C':'P'}</div><div class="detail"><div class="spread"><h3>${esc(item.description)}</h3><b class="money ${item.kind==='credit'?'accent':''}" style="white-space:nowrap;font-size:13px">${item.kind==='credit'?'+ ':'− '}${fmt(item.amount)}</b></div><p class="small" style="margin-top:4px">${item.date.slice(8,10)}/${item.date.slice(5,7)} · ${item.kind==='credit'?'Crédito':item.type==='card'?'Cartão':'Pix'} · ${item.done?'Realizado'+(item.doneAt?' em '+item.doneAt.slice(8,10)+'/'+item.doneAt.slice(5,7):''):'Previsto'}</p><div class="future-actions"><button class="icon-button" data-action="toggle-future" data-id="${esc(item.id)}">${item.done?'Voltar a previsto':'Marcar realizado'}</button><button class="icon-button" data-action="delete-future" data-id="${esc(item.id)}">Excluir</button></div></div></div>`).join('')}</div>` : '<p class="hint" style="margin-top:16px">Nenhum lançamento futuro. Você pode adicioná-los quando precisar.</p>'}
     </div>
     <div class="notice">As saídas previstas são reservadas imediatamente e distribuídas entre as semanas restantes. <b>Marcar realizado</b> atualiza o caixa ou a fatura provisoriamente. Quando você atualizar a posição bancária depois, o saldo informado substitui o ajuste automático, evitando duplicidade.</div>
+    ${month.migratedFromCalendar ? `<div class="notice">Dados da versão antiga preservados. Confira o saldo e a fatura do início do mês financeiro em Metas → Editar (${financialPeriod(month.key).start.slice(8,10)}/${financialPeriod(month.key).start.slice(5,7)}).</div>` : ''}
     ${heading('Base do planejamento')}
     <div class="card"><div class="indicator"><span class="indicator-label">Saldo inicial da conta</span><b class="indicator-value money">${fmt(month.startCash)}</b></div><div class="indicator"><span class="indicator-label">Fatura inicial</span><b class="indicator-value money">${fmt(month.startCard)}</b></div><div class="indicator"><span class="indicator-label">Gasto desde o início</span><b class="indicator-value money">${fmt(plan.spent)}</b></div></div>
   `;
@@ -194,9 +194,11 @@ function renderHistory(month) {
   const filtered = historyWeek === -1 ? records : records.filter(s => weekOfDate(s.at) === historyWeek);
   const { pos, plan } = activePlan(month);
   return `
-    <div class="eyebrow">REGISTROS SALVOS</div><h1 style="margin-top:8px">Histórico</h1>
+    <div class="eyebrow">POSIÇÃO E REGISTROS</div><h1 style="margin-top:8px">Histórico</h1>
     <div class="space"></div>
-    <div class="two-stats">${stat('Gasto líquido no mês',fmt(plan.spent))}${stat('Caixa após a fatura',fmt(openCash(month,pos)),openCash(month,pos)<0?'bad-text':'accent')}</div>
+    ${renderFinancialPosition(month)}
+    ${heading('Gasto acumulado no mês')}
+    <div class="two-stats">${stat('Gasto líquido no mês',fmt(plan.spent))}</div>
     ${heading('Evolução dos gastos','Atualizações e lançamentos realizados')}
     ${renderGraph(month)}
     ${heading('Posições registradas',`${records.length} atualização(ões)`)}
@@ -331,7 +333,7 @@ function submitCredit(form) {
 function exportData() {
   const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json;charset=utf-8'});
   const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download=`caixa-backup-${chosenMonth}.json`;
+  const a=document.createElement('a');a.href=url;a.download=`rastro-c-backup-${chosenMonth}.json`;
   document.body.append(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),500);
   notify('Backup exportado.');

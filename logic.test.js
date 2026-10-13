@@ -224,3 +224,44 @@ test('pendente vencido continua abatido e compromisso acima da disponibilidade g
   assert.equal(plan.uncoveredFuture,money(1000));
   assert.deepEqual(plan.available.slice(2),[0,0]);
 });
+
+test('regressão: posição de outubro com Pix S3 já conciliados não gera caixa insuficiente',()=>{
+  const start=2121861;
+  const m=newMonth('2026-10',start,start,0,defaultGoals(start));
+  m.snapshots=[{id:'saldo',at:'2026-10-13T15:09',cash:1260338,card:842970}];
+  // Lançamentos já contidos no saldo registrado; não são compromissos novos.
+  m.future=[
+    {id:'deb',date:'2026-10-13',kind:'debit',type:'pix',amount:111923,description:'Pagos',done:true,doneAt:'2026-10-13T12:00',snapshotCountAtDone:0},
+    {id:'cred',date:'2026-10-13',kind:'credit',type:'pix',amount:44000,description:'Recebidos',done:true,doneAt:'2026-10-13T12:00',snapshotCountAtDone:0},
+    {id:'desp',date:'2026-10-14',kind:'debit',type:'pix',amount:375000,description:'Futuro',done:false},
+    {id:'entrada',date:'2026-10-16',kind:'credit',type:'pix',amount:120000,description:'Receber',done:false}
+  ];
+  const result=calculatePlan(m,position(m),2);
+  assert.equal(result.rawPool,417368);
+  assert.equal(result.projectedPool,162368);
+  assert.equal(result.uncoveredFuture,0);
+  assert.equal(result.insufficient,0);
+  assert.deepEqual(result.available.slice(2),[60000,102368]);
+  assert.equal(result.available[2]+result.available[3],result.projectedPool);
+  assert.equal(actualWeekSpent(m,2),null,'fatura acumulada não pode ser atribuída integralmente à S3');
+});
+
+test('sem saldo anterior na S2, não se inventa quanto foi gasto na S3',()=>{
+  const m=create();
+  m.snapshots=[record('único','2026-10-13T12:00',12000,8000)];
+  m.future.push({id:'pix',date:'2026-10-04',kind:'debit',type:'pix',amount:money(100),description:'Pix anterior',done:true,doneAt:'2026-10-04T10:00',snapshotCountAtDone:0});
+  assert.equal(actualWeekSpent(m,2),null);
+});
+
+test('crédito recebido após o vencimento não cobre débito na data',()=>{
+  const m=create();
+  m.future=[
+    {id:'deb',date:'2026-10-14',kind:'debit',type:'pix',amount:money(3750),description:'Pagar',done:false},
+    {id:'cred',date:'2026-10-16',kind:'credit',type:'pix',amount:money(1200),description:'Receber',done:false}];
+  const insufficient=calculatePlan(m,{cash:money(3000),card:0},2);
+  assert.equal(insufficient.uncoveredFuture,money(750));
+  assert.equal(insufficient.projectedPool,money(450));
+  const adequate=calculatePlan(m,{cash:money(4200),card:0},2);
+  assert.equal(adequate.uncoveredFuture,0);
+  assert.equal(adequate.projectedPool,money(1650));
+});

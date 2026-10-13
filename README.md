@@ -1,4 +1,4 @@
-# Caixa — controle financeiro semanal
+# RASTRO - C — controle financeiro semanal
 
 Aplicativo PWA em português, com valores em reais, para GitHub Pages. Não precisa de conta, servidor ou bibliotecas externas. Os dados ficam apenas no navegador.
 
@@ -71,3 +71,12 @@ Para rodar testes unitários (Node.js 18+), execute `npm test`. Para abrir local
 - Ao prever um crédito na própria semana, o número principal é uma **projeção**: até o crédito chegar, consulte o saldo real antes de gastar.
 - O modelo de dados é o mesmo (`caixa-semanal-v3`): a atualização do código **não exige reimportar JSON** nem apaga registros salvos no navegador. Faça sempre backup antes de substituir os arquivos.
 
+
+## Versão 1.4 — interface reorganizada
+
+- O **Painel** exibe somente o cabeçalho, mês financeiro, as quatro semanas e o quadro principal com a meta livre, meta recalculada, ajuste e situação.
+- **Metas** reúne orçamento, metas originais e recalculadas, totais de despesas e créditos previstos, lançamentos e base do planejamento.
+- **Histórico** reúne a posição financeira (saldo, fatura e cobertura), botões **Atualizar posição** e **Registrar crédito recebido**, gráfico, registros e backup JSON.
+- Nome exibido no app, título e instalação: **RASTRO - C**.
+- O cabeçalho respeita `safe-area-inset-top` do iPhone, para não ficar sobreposto ao relógio, sinal e bateria.
+- **Nenhum dado é apagado**, e o formato do JSON continua igual; apenas a aparência e a organização das telas foram alteradas. Faça backup por segurança antes de substituir os arquivos.
