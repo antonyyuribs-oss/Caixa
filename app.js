@@ -1,8 +1,8 @@
 import {
-  STORAGE_KEY, monthKey, shiftMonth, monthLabel, lastDay, weekOfDate, rangeLabel,
+  STORAGE_KEY, LEGACY_STORAGE_KEY, monthKey, shiftMonth, monthLabel, financialPeriod, periodLabel, dayIndex, inFinancialMonth, weekOfDate, rangeLabel,
   centsFromInput, brl, inputAmount, nowLocalInput, defaultGoals, newMonth,
   orderedSnapshots, position, openCash, spentSinceStart, pendingFuture, calculatePlan,
-  effectiveWeek, pastWeekPosition, actualWeekSpent, validateState
+  effectiveWeek, pastWeekPosition, actualWeekSpent, validateState, validateLegacyState, migrateLegacyState
 } from './logic.js';
 
 const main = document.querySelector('#main');
@@ -16,11 +16,21 @@ const fmt = (number) => brl(number);
 const signed = (number) => `${number > 0 ? '+' : number < 0 ? '−' : ''}${fmt(Math.abs(number))}`;
 const input = (name, label, value, help = '', attrs = '') => `<div class="field"><label for="field-${name}">${label}</label><input id="field-${name}" name="${name}" type="text" inputmode="decimal" autocomplete="off" value="${esc(value)}" required ${attrs}>${help ? `<span class="helper">${help}</span>`:''}</div>`;
 
-let state;
+let state = { version: 2, months: {} };
+let migratedAtStart = false;
 try {
-  const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
-  state = validateState(raw) ? raw : { version: 1, months: {} };
-} catch { state = { version: 1, months: {} }; }
+  const current = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+  if (validateState(current)) state = current;
+  else {
+    const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || 'null');
+    if (validateLegacyState(legacy)) {
+      state = migrateLegacyState(legacy);
+      migratedAtStart = true;
+      // Os registros antigos permanecem no armazenamento anterior, intactos.
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+  }
+} catch (error) { console.warn('Não foi possível carregar ou migrar os dados.', error); }
 let view = 'dashboard';
 let chosenMonth = monthKey();
 let chosenWeek = weekOfDate(nowLocalInput());
@@ -44,10 +54,11 @@ function stat(label, value, tone = '') { return `<div class="small-stat"><span>$
 function btn(action, text, clazz='secondary', extra='') { return `<button type="button" class="${clazz}" data-action="${action}" ${extra}>${text}</button>`; }
 function weekTabs(selected, action) {
   return `<div class="week-tabs" role="group" aria-label="Selecionar semana">${[0,1,2,3].map(i =>
-    `<button type="button" class="week ${selected === i ? 'active' : ''} ${chosenMonth === monthKey() && weekOfDate(nowLocalInput()) === i ? 'current' : ''}" data-action="${action}" data-week="${i}" aria-pressed="${selected === i}"><strong>S${i+1}</strong><span>${rangeLabel(chosenMonth,i).split('/')[0]}</span><i class="dot"></i></button>`).join('')}</div>`;
+    `<button type="button" class="week ${selected === i ? 'active' : ''} ${chosenMonth === monthKey() && weekOfDate(nowLocalInput()) === i ? 'current' : ''}" data-action="${action}" data-week="${i}" aria-pressed="${selected === i}"><strong>S${i+1}</strong><span>${rangeLabel(chosenMonth,i)}</span><i class="dot"></i></button>`).join('')}</div>`;
 }
 function render() {
   document.querySelector('#month-title').textContent = monthLabel(chosenMonth);
+  document.querySelector('#period-strip').textContent = `Mês financeiro: ${periodLabel(chosenMonth)}`;
   document.querySelectorAll('[data-tab]').forEach(node => {
     node.classList.toggle('active', node.dataset.tab === view);
     if (node.dataset.tab === view) node.setAttribute('aria-current', 'page');
@@ -57,7 +68,7 @@ function render() {
   main.innerHTML = !month ? renderMissing() : view === 'dashboard' ? renderDashboard(month) : view === 'goals' ? renderGoals(month) : renderHistory(month);
 }
 function renderMissing() {
-  return `<div class="space"></div><div class="eyebrow">COMECE PELO PLANEJAMENTO</div><div class="space"></div><div class="empty"><div class="empty-icon">◎</div><h2>Seu caixa começa aqui</h2><p>Defina o orçamento do mês, o saldo inicial da conta e as metas das quatro semanas. Depois, atualize apenas a posição do cartão e do caixa.</p>${btn('open-setup','Criar planejamento mensal','primary')}</div><div class="space"></div><p class="center fine">Sem cadastro e sem conexão bancária. Seus registros ficam neste navegador.</p>`;
+  return `<div class="space"></div><div class="eyebrow">COMECE PELO PLANEJAMENTO</div><div class="space"></div><div class="empty"><div class="empty-icon">◎</div><h2>Seu caixa começa aqui</h2><p>Defina o orçamento do mês, o saldo inicial da conta e as metas das quatro semanas. Depois, atualize apenas a posição do cartão e do caixa. Cada mês financeiro começa no dia 26 e termina no dia 25.</p>${btn('open-setup','Criar planejamento mensal','primary')}</div><div class="space"></div><p class="center fine">Sem cadastro e sem conexão bancária. Seus registros ficam neste navegador.</p>`;
 }
 function activePlan(month) {
   const pos = position(month);
@@ -95,6 +106,7 @@ function renderDashboard(month) {
       <div class="hero-note">${past && !historical ? 'Nenhuma atualização registrada nessa semana' : `Meta recalculada: ${adjustedGoal === null ? '—' : fmt(adjustedGoal)}`}</div>
       <div class="hero-foot"><div><span class="foot-label">Original: ${fmt(original)} · Ajuste</span><b class="money ${difference < 0 ? 'warn-text' : difference > 0 ? 'accent' : ''}">${difference === null ? '—' : signed(difference)}</b></div><div><span class="foot-label">Situação</span>${gap}</div></div>
     </section>
+    ${month.migratedFromCalendar ? `<div class="notice">Dados da versão antiga preservados. Confira em Metas → Editar se o saldo e a fatura iniciais correspondem a <b>${financialPeriod(month.key).start.slice(8,10)}/${financialPeriod(month.key).start.slice(5,7)}</b>, início deste mês financeiro. As posições foram redistribuídas conforme a data.</div>` : ''}
     ${currentData ? '<div class="notice">Posição inicial registrada no planejamento. Para refletir os gastos do mês, atualize o saldo da conta e a fatura do cartão.</div>' : ''}
     ${past && !historical ? '<div class="notice">Não há atualização nessa semana. O aplicativo não inventa valores históricos.</div>' : ''}
     ${available !== null && spentWeek === null ? '<div class="notice">Sem registro anterior para separar os gastos desta semana. O limite restante está correto para o saldo informado, mas não é possível calcular o ajuste total da meta semanal.</div>' : ''}
@@ -131,7 +143,7 @@ function renderGoals(month) {
     <div class="goal-grid">${month.goals.map((value, i) => {
       const historical = i < active ? pastWeekPosition(month, i) : null;
       const adjusted = i < active ? historical ? calculatePlan(month, historical, i).available[i] : null : plan.available[i];
-      return `<div class="goal-tile ${i===active?'selected':''}"><span class="eyebrow">Semana ${i+1}</span><div class="amount money">${fmt(value)}</div><div class="compare">${adjusted === null ? 'Sem registro' : `Recalculada: ${fmt(adjusted)}`}</div></div>`;
+      return `<div class="goal-tile ${i===active?'selected':''}"><span class="eyebrow">Semana ${i+1} · ${rangeLabel(month.key,i)}</span><div class="amount money">${fmt(value)}</div><div class="compare">${adjusted === null ? 'Sem registro' : `Recalculada: ${fmt(adjusted)}`}</div></div>`;
     }).join('')}</div>
     ${heading('Lançamentos futuros',`${commitments.length} pendente(s)`)}
     <div class="card">
@@ -147,17 +159,19 @@ function renderGoals(month) {
 function curvePath(points) { return points.map((p,i)=>`${i===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' '); }
 function renderGraph(month) {
   const snaps = orderedSnapshots(month);
-  const W=400,H=204, left=40,right=10,top=15,bottom=31;
+  const period = financialPeriod(month.key);
+  const W=400,H=204,left=40,right=10,top=15,bottom=31;
   const baseY=H-bottom;
-  const maxDay=lastDay(month.key);
-  const toX = d=>left+(d-1)/(maxDay-1)*(W-left-right);
-  const maxV = Math.max(month.budget, ...snaps.map(s => spentSinceStart(month,s)), 1);
+  const maxIndex=Math.max(1,period.days-1);
+  const toX = d=>left+(d/maxIndex)*(W-left-right);
+  const maxV = Math.max(month.budget,...snaps.map(s=>spentSinceStart(month,s)),1);
   const toY = v=>baseY-Math.max(0,v)/maxV*(baseY-top);
-  const planned = [[1,0], [7,month.goals[0]],[14,month.goals[0]+month.goals[1]], [21,month.goals[0]+month.goals[1]+month.goals[2]], [maxDay,month.budget]].map(([d,v])=>[toX(d),toY(v)]);
-  const real = snaps.map(s=>[toX(Number(s.at.slice(8,10))),toY(spentSinceStart(month,s))]);
-  return `<div class="graph"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico de gastos acumulados ao longo do mês, planejado e registrado">
+  const planned = [[0,0],...period.weeks.map((w,i)=>[w.endOffset,month.goals.slice(0,i+1).reduce((a,b)=>a+b,0)])].map(([d,v])=>[toX(d),toY(v)]);
+  const real = snaps.map(s=>[toX(dayIndex(month.key,s.at)),toY(spentSinceStart(month,s))]);
+  const ticks=[{at:0,label:period.start.slice(8,10)+'/'+period.start.slice(5,7)},...period.weeks.map(w=>({at:w.endOffset,label:w.end.slice(8,10)+'/'+w.end.slice(5,7)}))];
+  return `<div class="graph"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico de gastos acumulados ao longo do mês financeiro, planejado e registrado">
     ${[0,.5,1].map(n=>`<line class="gridline" x1="${left}" y1="${toY(maxV*n)}" x2="${W-right}" y2="${toY(maxV*n)}"/><text x="${left-5}" y="${toY(maxV*n)+4}" text-anchor="end">${(maxV*n/100/1000).toFixed(0)}k</text>`).join('')}
-    ${[1,7,14,21,maxDay].map(d=>`<text x="${toX(d)}" y="${H-9}" text-anchor="middle">${d}</text>`).join('')}
+    ${ticks.map(t=>`<text x="${toX(t.at)}" y="${H-9}" text-anchor="${t.at===0?'start':t.at===maxIndex?'end':'middle'}">${t.label}</text>`).join('')}
     <path class="budgetline" d="${curvePath(planned)}"/>
     ${real.length > 1 ? `<path class="series" d="${curvePath(real)}"/>` : ''}
     ${real.map(point=>`<circle cx="${point[0]}" cy="${point[1]}" r="3.7" fill="#70d1af" stroke="#15231e" stroke-width="2"/>`).join('')}
@@ -200,11 +214,11 @@ function setupModal() {
   const budget = current?.budget ?? 1200000;
   const goals = current?.goals || defaultGoals(budget);
   modal(`<form data-form="setup" class="form-grid" novalidate>
-    <p class="hint">Defina o orçamento fixo, a posição financeira no início do mês e as quatro metas originais.</p>
+    <p class="hint">Período: <b>${periodLabel(chosenMonth)}</b>. Informe o saldo e a fatura do dia 26, início deste mês financeiro, além das metas originais.</p>
     ${input('budget','Orçamento mensal (R$)',inputAmount(budget))}
     <div class="fieldrow">${input('startCash','Saldo inicial da conta',inputAmount(current?.startCash ?? budget))}${input('startCard','Fatura inicial',inputAmount(current?.startCard ?? 0))}</div>
     <div class="spread"><h3>Metas originais</h3>${btn('split-goals','Dividir igualmente','ghost compact')}</div>
-    <div class="goal-grid">${goals.map((g,i)=>input(`goal${i}`,`Semana ${i+1}`,inputAmount(g))).join('')}</div>
+    <div class="goal-grid">${goals.map((g,i)=>input(`goal${i}`,`Semana ${i+1} · ${rangeLabel(chosenMonth,i)}`,inputAmount(g))).join('')}</div>
     <p class="fine">A soma das quatro metas deve ser igual ao orçamento mensal. O saldo inicial é uma referência para acompanhar as alterações do caixa e da fatura.</p>
     ${current?.snapshots.length ? '<div class="notice">Atenção: mudar o saldo ou a fatura inicial também altera os cálculos históricos.</div>' : ''}
     <div class="modal-bottom"><button class="primary wide" type="submit">${current?'Salvar planejamento':'Criar planejamento'}</button></div>
@@ -213,10 +227,11 @@ function setupModal() {
 function updateModal() {
   const m=getMonth(); if(!m){setupModal();return;}
   const pos=position(m);
-  const dateNow=monthKey()===chosenMonth?nowLocalInput():`${chosenMonth}-${String(lastDay(chosenMonth)).padStart(2,'0')}T18:00`;
+  const period=financialPeriod(chosenMonth);
+  const dateNow=monthKey()===chosenMonth?nowLocalInput():`${period.end}T18:00`;
   modal(`<form data-form="update" class="form-grid" novalidate>
     <p class="hint">Preencha os saldos atuais, não a diferença desde a atualização anterior.</p>
-    <div class="field"><label for="field-at">Data e hora da posição</label><input id="field-at" name="at" type="datetime-local" value="${dateNow}" required></div>
+    <div class="field"><label for="field-at">Data e hora da posição</label><input id="field-at" name="at" type="datetime-local" min="${period.start}T00:00" max="${period.end}T23:59" value="${dateNow}" required><span class="helper">Período: ${periodLabel(chosenMonth)}</span></div>
     ${input('cash','Saldo atual da conta (R$)',inputAmount(pos.cash),'Pix já realizados estão refletidos aqui.')}
     ${input('card','Total da fatura em aberto (R$)',inputAmount(pos.card),'A fatura deve incluir os gastos no cartão ainda não pagos.')}
     <div class="field"><label for="field-note">Observação (opcional)</label><input id="field-note" name="note" type="text" maxlength="100" placeholder="Ex.: fechamento da semana"></div>
@@ -225,18 +240,19 @@ function updateModal() {
   </form>`,'Atualizar posição');
 }
 function futureModal() {
-  const d = monthKey()===chosenMonth?nowLocalInput().slice(0,10):`${chosenMonth}-01`;
+  const period=financialPeriod(chosenMonth);
+  const d = monthKey()===chosenMonth?nowLocalInput().slice(0,10):period.start;
   modal(`<form data-form="future" class="form-grid" novalidate>
     <p class="hint">Inclua uma despesa prevista, no cartão ou por Pix. Ela será considerada no planejamento da semana da data indicada.</p>
     <div class="field"><label for="future-desc">Descrição</label><input id="future-desc" name="description" maxlength="90" placeholder="Ex.: energia, parcela, transferência" required></div>
-    <div class="fieldrow"><div class="field"><label for="future-date">Data prevista</label><input id="future-date" type="date" name="date" value="${d}" required></div><div class="field"><label for="future-type">Tipo</label><select id="future-type" name="type"><option value="card">Cartão</option><option value="pix">Pix</option></select></div></div>
+    <div class="fieldrow"><div class="field"><label for="future-date">Data prevista</label><input id="future-date" type="date" name="date" min="${period.start}" max="${period.end}" value="${d}" required></div><div class="field"><label for="future-type">Tipo</label><select id="future-type" name="type"><option value="card">Cartão</option><option value="pix">Pix</option></select></div></div>
     ${input('amount','Valor (R$)','0,00')}
     <p class="fine">Quando essa despesa aparecer na fatura ou sair da conta, atualize a posição e marque-a como realizada.</p>
     <div class="modal-bottom"><button type="submit" class="primary wide">Adicionar lançamento</button></div>
   </form>`,'Lançamento futuro');
 }
 function monthModal() {
-  modal(`<div class="stack" style="gap:19px"><p class="hint">Selecione o mês que deseja acompanhar. Cada mês possui planejamento e histórico próprios.</p><div class="month-arrows"><button data-action="prev-month" aria-label="Mês anterior">‹</button><b>${monthLabel(chosenMonth)}</b><button data-action="next-month" aria-label="Mês seguinte">›</button></div><div class="field"><label for="select-month">Ir para o mês</label><input type="month" id="select-month" value="${chosenMonth}"></div>${btn('go-month','Abrir mês','primary wide')}</div>`,'Selecionar mês');
+  modal(`<div class="stack" style="gap:19px"><p class="hint">Cada mês financeiro vai do dia 26 do mês anterior ao dia 25 do mês indicado. O planejamento e o histórico são independentes.</p><div class="month-arrows"><button data-action="prev-month" aria-label="Mês anterior">‹</button><b>${monthLabel(chosenMonth)}</b><button data-action="next-month" aria-label="Mês seguinte">›</button></div><div class="field"><label for="select-month">Ir para o mês</label><input type="month" id="select-month" value="${chosenMonth}"></div>${btn('go-month','Abrir mês','primary wide')}</div>`,'Selecionar mês');
 }
 function changeMonth(delta) {
   chosenMonth = shiftMonth(chosenMonth, delta);
@@ -256,14 +272,14 @@ function submitSetup(form) {
   const goals=[0,1,2,3].map(i=>parseNonnegative(form,`goal${i}`));
   if(goals.reduce((s,n)=>s+n,0)!==budget) throw new Error(`As quatro metas devem somar ${fmt(budget)}.`);
   const previous=getMonth();
-  if(previous){Object.assign(previous,{budget,startCash,startCard,goals});}
+  if(previous){Object.assign(previous,{budget,startCash,startCard,goals,migratedFromCalendar:false});}
   else state.months[chosenMonth]=newMonth(chosenMonth,budget,startCash,startCard,goals);
   save();closeModal();render();notify('Planejamento salvo.');
 }
 function submitUpdate(form) {
   const m=getMonth();if(!m)return;
   const at=form.elements.at.value;
-  if(!at || at.slice(0,7)!==chosenMonth || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(at)) throw new Error('Selecione uma data válida dentro do mês aberto.');
+  if(!at || !inFinancialMonth(at,chosenMonth) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(at) || !Number.isFinite(Date.parse(at))) throw new Error('Selecione uma data válida dentro do mês financeiro aberto (26 a 25).');
   const cash=parseNonnegative(form,'cash');const card=parseNonnegative(form,'card');
   const note=(form.elements.note.value||'').trim().slice(0,100);
   m.snapshots.push({id:id(),at,cash,card,note});
@@ -275,7 +291,7 @@ function submitFuture(form) {
   const description=form.elements.description.value.trim();
   const type=form.elements.type.value;
   const amount=parseNonnegative(form,'amount',false);
-  if(!date.startsWith(chosenMonth)) throw new Error('A data deve pertencer ao mês selecionado.');
+  if(!inFinancialMonth(date,chosenMonth)) throw new Error('A data deve pertencer ao mês financeiro selecionado (26 a 25).');
   if(!description || !['pix','card'].includes(type)) throw new Error('Informe a descrição e o tipo.');
   m.future.push({id:id(),date,description,type,amount,done:false});
   save();closeModal();render();notify('Lançamento adicionado.');
@@ -292,12 +308,14 @@ async function importData(file) {
   if(!file)return;
   if(file.size>5_000_000) throw new Error('O arquivo é muito grande.');
   let parsed;try{parsed=JSON.parse(await file.text());}catch{throw new Error('Arquivo JSON inválido.');}
-  if(!validateState(parsed)) throw new Error('O arquivo não contém um backup válido deste aplicativo.');
+  const legacy = validateLegacyState(parsed);
+  if(!legacy && !validateState(parsed)) throw new Error('O arquivo não contém um backup válido deste aplicativo.');
   if(!confirm('Importar substituirá todos os dados deste navegador. Continuar?'))return;
-  state=parsed;save();
+  state = legacy ? migrateLegacyState(parsed) : parsed;
+  save();
   if(!state.months[chosenMonth])chosenMonth=Object.keys(state.months).sort().at(-1)||monthKey();
   chosenWeek=chosenMonth===monthKey()?weekOfDate(nowLocalInput()):0;
-  historyWeek=-1;view='dashboard';closeModal();render();notify('Backup importado.');
+  historyWeek=-1;view='dashboard';closeModal();render();notify(legacy?'Backup antigo importado. Confira os saldos iniciais em Metas.':'Backup importado.');
 }
 
 document.addEventListener('click',event=>{
