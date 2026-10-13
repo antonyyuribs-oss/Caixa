@@ -142,7 +142,7 @@ function distribute(weights, amount) {
   if(!sum || amount<=0)return result;
   let allocated=0;
   for(let i=0;i<weights.length;i++) {
-    result[i]=i===weights.length-1 ? amount-allocated : Math.floor(amount*weights[i]/sum);
+    result[i]=i===weights.length-1 ? amount-allocated : Math.min(amount-allocated,Math.round(amount*weights[i]/sum));
     allocated+=result[i];
   }
   return result;
@@ -163,23 +163,31 @@ export function calculatePlan(month,pos,activeWeek) {
   const rawPool=Math.min(budgetLeft,liquid);
   const commitments=pendingByWeek(month,'debit');
   const income=pendingByWeek(month,'credit');
-  const finished=month.future.filter(f=>f.done&&f.doneAt&&inFinancialMonth(f.doneAt,month.key)&&weekOfDate(f.doneAt)>=active);
-  const completedDebit=finished.filter(f=>(f.kind||'debit')==='debit').reduce((s,f)=>s+f.amount,0);
-  const completedCredit=finished.filter(f=>f.kind==='credit').reduce((s,f)=>s+f.amount,0);
-  const bufferedPool=Math.max(0,rawPool+completedDebit-completedCredit);
+  const pendingDebit=commitments.reduce((a,b)=>a+b,0);
+  const pendingCredit=income.reduce((a,b)=>a+b,0);
+  // Valores realizados já afetam a posição. Para que o botão “Realizado” não
+  // remova uma reserva previamente distribuída, podemos recompor esse montante
+  // apenas como referência de distribuição e abatê-lo no mesmo cálculo.
+  // Sem uma posição na semana anterior, porém, não é seguro reconstruir o gasto
+  // semanal de uma fatura acumulada: usa-se somente o caixa líquido conhecido.
+  const hasWeekBaseline=active===0 || actualWeekSpent(month,active)!==null;
+  const completed=hasWeekBaseline ? month.future.filter(f=>f.done&&f.doneAt&&inFinancialMonth(f.doneAt,month.key)&&weekOfDate(f.doneAt)>=active) : [];
+  const completedDebit=completed.filter(f=>(f.kind||'debit')==='debit').reduce((s,f)=>s+f.amount,0);
+  const completedCredit=completed.filter(f=>f.kind==='credit').reduce((s,f)=>s+f.amount,0);
+  const remaining=Math.max(0,rawPool+completedDebit-completedCredit);
   const desired=[...month.goals];
   const base=[null,null,null,null];
-  let remainder=bufferedPool;
+  let remainder=remaining;
+  // Preserva prioritariamente as metas das semanas seguintes.
   for(let i=3;i>=active;i--){base[i]=Math.min(remainder,desired[i]);remainder-=base[i];}
   base[3]+=remainder;
-  const before=base.slice(active);
-  const reserve=commitments.reduce((a,b)=>a+b,0)+completedDebit;
-  let adjusted=reduceProportionally(before,reserve);
-  const creditsByWeek=[...income];
-  for(const f of finished.filter(f=>f.kind==='credit'))creditsByWeek[Math.max(active,weekOfDate(f.doneAt))]+=f.amount;
-  const creditSum=creditsByWeek.reduce((a,b)=>a+b,0);
+  let adjusted=reduceProportionally(base.slice(active),pendingDebit+completedDebit);
+  // Créditos previstos só liberam valores a partir da semana de recebimento.
+  // Créditos já realizados podem ser redistribuídos a partir de sua semana.
+  const incomeForAllocation=[...income];
+  for(const f of completed.filter(f=>f.kind==='credit')) incomeForAllocation[Math.max(active,weekOfDate(f.doneAt))]+=f.amount;
   for(let w=active;w<4;w++) {
-    const amount=creditsByWeek[w];
+    const amount=incomeForAllocation[w];
     if(!amount)continue;
     const offset=w-active;
     const weights=adjusted.slice(offset).map((v,i)=>Math.max(v,month.goals[w+i]));
@@ -188,15 +196,34 @@ export function calculatePlan(month,pos,activeWeek) {
   }
   const available=[null,null,null,null];
   adjusted.forEach((value,i)=>available[active+i]=value);
-  const pendingDebit=commitments.reduce((a,b)=>a+b,0);
-  const projectedPool=rawPool-pendingDebit+income.reduce((a,b)=>a+b,0);
-  const uncoveredFuture=Math.max(0,reserve-bufferedPool);
+  // Além da suficiência ao final do mês, o caixa deve conseguir pagar cada
+  // compromisso na data, sem antecipar um crédito que só chegará depois.
+  let cashFlow=rawPool;
+  let uncoveredFuture=Math.max(0,-cashFlow);
+  const events=new Map();
+  for(const item of pendingFuture(month)) {
+    if(!inFinancialMonth(item.date,month.key))continue;
+    const value=(item.kind||'debit')==='credit' ? item.amount : -item.amount;
+    events.set(item.date,(events.get(item.date)||0)+value);
+  }
+  for(const day of [...events.keys()].sort()) {
+    cashFlow+=events.get(day);
+    uncoveredFuture=Math.max(uncoveredFuture,-cashFlow);
+  }
+  const projectedPool=rawPool-pendingDebit+pendingCredit;
+  // Pode haver déficit temporário enquanto uma entrada ainda não ocorreu. Não
+  // é permitido mostrar mais dinheiro distribuído que o saldo líquido final.
+  const assigned=available.slice(active).reduce((a,b)=>a+b,0);
+  const ceiling=Math.max(0,projectedPool);
+  if(assigned>ceiling){
+    const corrected=reduceProportionally(available.slice(active),assigned-ceiling);
+    corrected.forEach((v,i)=>available[active+i]=v);
+  }
   return {available,desired,commitments,income,uncoveredFuture,spent,budgetLeft,liquid,rawPool,
     projectedPool,insufficient:Math.max(0,-rawPool),
     futureCard:pendingFuture(month).filter(e=>(e.kind||'debit')==='debit'&&e.type==='card').reduce((s,e)=>s+e.amount,0),
     futurePix:pendingFuture(month).filter(e=>(e.kind||'debit')==='debit'&&e.type==='pix').reduce((s,e)=>s+e.amount,0),
-    futureCredit:income.reduce((a,b)=>a+b,0), totalDebit:pendingDebit,
-    completedDebit,completedCredit};
+    futureCredit:pendingCredit,totalDebit:pendingDebit};
 }
 // 'available' já é líquido das despesas previstas — nada é subtraído duas vezes.
 export function freeForNewSpending(plan,index) {return plan.available[index];}
@@ -222,9 +249,12 @@ export function actualWeekSpent(month,index) {
   const events=snaps.some(s=>s.at>=start&&s.at<=end)
     ||month.future.some(f=>f.doneAt&&f.doneAt>=start&&f.doneAt<=end);
   if(!events)return null;
-  const prior=snaps.filter(s=>s.at<start).at(-1);
-  const priorEvents=month.future.some(f=>f.doneAt&&f.doneAt<start);
-  if(index>0&&!prior&&!priorEvents)return null;
+  // Uma posição feita durante esta semana não revela quando ocorreram as
+  // compras anteriores acumuladas na fatura. Sem posição na semana anterior,
+  // o gasto real desta semana NÃO pode ser atribuído com confiança.
+  const previousWeek=index>0 ? financialPeriod(month.key).weeks[index-1] : null;
+  const hasPriorBaseline=index===0 || snaps.some(s=>s.at<start&&s.at.slice(0,10)>=previousWeek.start);
+  if(!hasPriorBaseline)return null;
   const previous=new Date(Date.parse(start+'Z')-60000).toISOString().slice(0,16);
   return openCash(month,position(month,previous))-openCash(month,position(month,end));
 }

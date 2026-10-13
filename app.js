@@ -98,24 +98,26 @@ function renderDashboard(month) {
   const covered = pos.cash >= pos.card;
   const coverageMargin = pos.cash - pos.card;
   const currentData = !orderedSnapshots(month).length;
-  const caption = past ? `Posição registrada na semana ${chosenWeek + 1}` : chosenWeek === active ? 'Livre para novos gastos nesta semana' : `Livre previsto para a semana ${chosenWeek + 1}`;
+  const pendingCreditsThisWeek=month.future.some(f=>!f.done&&f.kind==='credit'&&weekOfDate(f.date)===chosenWeek);
+  const caption = past ? `Posição registrada na semana ${chosenWeek + 1}` : chosenWeek === active ? (pendingCreditsThisWeek ? 'Livre projetado para esta semana' : 'Livre para novos gastos nesta semana') : `Livre previsto para a semana ${chosenWeek + 1}`;
   const lastText = pos.at ? `Atualizado ${labelDay(pos.at)}` : 'Use “Atualizar posição” para registrar os gastos';
-  const gap = visible.rawPool < 0 || visible.uncoveredFuture > 0 ? badge('Caixa insuficiente', 'bad') : difference !== null && difference < 0 ? badge('Meta ajustada', 'warn') : badge('Dentro do planejamento', 'good');
+  const gap = visible.rawPool < 0 || visible.uncoveredFuture > 0 ? badge('Caixa insuficiente', 'bad') : difference === null ? badge('Compromissos cobertos', 'good') : difference < 0 ? badge('Meta ajustada', 'warn') : badge('Dentro do planejamento', 'good');
   return `
     <div class="spread"><div class="eyebrow">CONTROLE SEMANAL</div>${badge('Fechamento em zero')}</div>
     ${weekTabs(chosenWeek, 'select-week')}
     <section class="hero" aria-label="Meta da semana">
       <div class="eyebrow">${caption}</div>
       <div class="hero-value money">${free === null ? '—' : fmt(free)}</div>
-      <div class="hero-note">${past && !historical ? 'Nenhuma atualização registrada nessa semana' : `Meta recalculada (após previsões): ${adjustedGoal === null ? '—' : fmt(adjustedGoal)}`}</div>
+      <div class="hero-note">${past && !historical ? 'Nenhuma atualização registrada nessa semana' : adjustedGoal === null ? 'Meta recalculada: falta posição da semana anterior' : `Meta recalculada (após previsões): ${fmt(adjustedGoal)}`}</div>
       <div class="hero-foot"><div><span class="foot-label">Original: ${fmt(original)} · Ajuste</span><b class="money ${difference < 0 ? 'warn-text' : difference > 0 ? 'accent' : ''}">${difference === null ? '—' : signed(difference)}</b></div><div><span class="foot-label">Situação</span>${gap}</div></div>
     </section>
     ${(futureTotal>0||futureCreditTotal>0)&&!past ? `<div class="card" style="margin-top:12px"><div class="indicator"><span class="indicator-label">Despesas previstas no mês</span><b class="indicator-value money">− ${fmt(futureTotal)}</b></div><div class="indicator"><span class="indicator-label">Créditos previstos no mês</span><b class="indicator-value money accent">+ ${fmt(futureCreditTotal)}</b></div><p class="fine">As saídas previstas são distribuídas desde já pelas semanas restantes. Créditos previstos entram na projeção a partir da semana de recebimento.</p></div>` : ''}
     ${month.migratedFromCalendar ? `<div class="notice">Dados da versão antiga preservados. Confira em Metas → Editar se o saldo e a fatura iniciais correspondem a <b>${financialPeriod(month.key).start.slice(8,10)}/${financialPeriod(month.key).start.slice(5,7)}</b>, início deste mês financeiro. As posições foram redistribuídas conforme a data.</div>` : ''}
     ${currentData ? '<div class="notice">Posição inicial registrada no planejamento. Para refletir os gastos do mês, atualize o saldo da conta e a fatura do cartão.</div>' : ''}
     ${past && !historical ? '<div class="notice">Não há atualização nessa semana. O aplicativo não inventa valores históricos.</div>' : ''}
-    ${available !== null && spentWeek === null ? '<div class="notice">Sem registro anterior para separar os gastos desta semana. O limite restante está correto para o saldo informado, mas não é possível calcular o ajuste total da meta semanal.</div>' : ''}
+    ${available !== null && spentWeek === null ? '<div class="notice">Sem posição bancária registrada na semana anterior, não é possível identificar quanto da fatura foi gasto especificamente nesta semana. O valor livre é calculado pela posição atual, mas a meta recalculada total e seu ajuste ficam sem comparação.</div>' : ''}
     ${futureTotal > 0 ? `<div class="notice">Despesas futuras pendentes no mês: <b>${fmt(futureTotal)}</b>. O valor principal já foi reduzido pela reserva distribuída entre as semanas restantes.</div>` : ''}
+    ${visible.income.slice(active).some(x=>x>0) && !past ? '<div class="notice">O limite semanal considera créditos ainda previstos. Antes de gastar, confira se a entrada já ocorreu e se o saldo real está disponível.</div>' : ''}
     ${visible.uncoveredFuture > 0 ? `<div class="notice danger">Há ${fmt(visible.uncoveredFuture)} em compromissos futuros sem cobertura no planejamento restante. Reveja os valores ou as metas.</div>` : ''}
     ${heading('Posição financeira','Valores atuais')}
     <div class="card">

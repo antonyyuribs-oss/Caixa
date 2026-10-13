@@ -61,3 +61,13 @@ A nova versão lê os registros anteriores automaticamente e mantém uma cópia 
 **Histórico** apresenta as posições registradas, as despesas acumuladas e o gráfico. Os lançamentos realizados também influenciam o gráfico. O aplicativo não acessa sua conta bancária nem envia Pix.
 
 Para rodar testes unitários (Node.js 18+), execute `npm test`. Para abrir localmente, use um servidor estático (`python -m http.server 8000`).
+
+## Correção 1.3 — conciliação de faturas e lançamentos
+
+- As despesas e entradas **já realizadas e incluídas no saldo registrado** não geram uma segunda reserva de pagamento.
+- A disponibilidade projetada considera despesas pendentes e créditos ainda previstos **uma única vez**.
+- O alerta de caixa verifica, por data, se há cobertura para os pagamentos antes da chegada das entradas futuras.
+- O cálculo não atribui a fatura acumulada de uma única atualização integralmente à semana corrente. Sem uma posição de referência na semana anterior, a comparação de **meta semanal recalculada** fica indisponível; o **caixa disponível** e a **projeção mensal** continuam sendo calculados.
+- Ao prever um crédito na própria semana, o número principal é uma **projeção**: até o crédito chegar, consulte o saldo real antes de gastar.
+- O modelo de dados é o mesmo (`caixa-semanal-v3`): a atualização do código **não exige reimportar JSON** nem apaga registros salvos no navegador. Faça sempre backup antes de substituir os arquivos.
+
