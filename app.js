@@ -36,7 +36,28 @@ let view = 'dashboard';
 let chosenMonth = monthKey();
 let chosenWeek = weekOfDate(nowLocalInput());
 let historyWeek = -1;
+let historyChart = 'spending';
 let toastHandle = 0;
+const THEME_KEY='rastro-c-appearance-v1';
+const THEMES=[
+  {id:'graphite',name:'Grafite',group:'escuros',swatches:['#10141b','#202836','#70d1af']},
+  {id:'navy',name:'Marinho',group:'escuros',swatches:['#101c30','#1e3250','#83b9eb']},
+  {id:'olive',name:'Oliva',group:'escuros',swatches:['#171e18','#303e30','#a8ca87']},
+  {id:'nude',name:'Nude',group:'claros',swatches:['#f7f1ea','#e9d9cb','#94694f']},
+  {id:'rose',name:'Rosé',group:'claros',swatches:['#f9f1f5','#eadde7','#936581']}
+];
+let theme='graphite';
+try { const value=localStorage.getItem(THEME_KEY); if(THEMES.some(t=>t.id===value))theme=value; }catch{}
+function setTheme(next) {
+  if(!THEMES.some(t=>t.id===next))return;
+  theme=next;
+  document.documentElement.dataset.theme=theme;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',THEMES.find(t=>t.id===theme).swatches[0]);
+  try { localStorage.setItem(THEME_KEY,theme); }catch{}
+  render();
+}
+document.documentElement.dataset.theme=theme;
+
 
 function save() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); return true; }
@@ -152,42 +173,81 @@ function renderGoals(month) {
       const adjusted = i < active ? historical ? calculatePlan(month, historical, i).available[i] : null : plan.available[i];
       const free = i < active ? null : freeForNewSpending(plan,i);
       const reserved = i < active ? 0 : plan.commitments[i];
-      return `<div class="goal-tile ${i===active?'selected':''}"><span class="eyebrow">Semana ${i+1} · ${rangeLabel(month.key,i)}</span><div class="amount money">${fmt(value)}</div><div class="compare">${adjusted === null ? 'Sem registro' : `Recalculada: ${fmt(adjusted)}`}${reserved>0?`<br>Futuros: ${fmt(reserved)}<br><strong>Livre: ${fmt(free)}</strong>`:''}</div></div>`;
+      return `<button type="button" class="goal-tile ${i===active?'selected':''} editable-tile" data-action="edit-goal" data-week="${i}" aria-label="Editar meta original da semana ${i+1}"><span class="eyebrow">Semana ${i+1} · ${rangeLabel(month.key,i)}</span><div class="amount money">${fmt(value)}</div><div class="compare">${adjusted === null ? 'Sem registro' : `Recalculada: ${fmt(adjusted)}`}${reserved>0?`<br>Futuros: ${fmt(reserved)}<br><strong>Livre: ${fmt(free)}</strong>`:''}</div><span class="tap-hint">Toque para editar ↗</span></button>`;
     }).join('')}</div>
     ${renderForecastSummary(month)}
     ${heading('Lançamentos',`${month.future.length} registro(s) · ${commitments.length} previsto(s)`)}
     <div class="card">
       <div class="spread"><p class="hint" style="max-width:270px">Pix, cartão e créditos. Marque cada lançamento como realizado quando acontecer.</p>${btn('open-future','＋ Adicionar','secondary compact')}</div>
-      ${month.future.length ? `<div style="margin-top:8px">${[...month.future].sort((a,b)=>a.date.localeCompare(b.date)).map(item=>`
-        <div class="future-row ${item.done?'done':''}"><div class="icon">${item.kind==='credit'?'＋':item.type==='card'?'C':'P'}</div><div class="detail"><div class="spread"><h3>${esc(item.description)}</h3><b class="money ${item.kind==='credit'?'accent':''}" style="white-space:nowrap;font-size:13px">${item.kind==='credit'?'+ ':'− '}${fmt(item.amount)}</b></div><p class="small" style="margin-top:4px">${item.date.slice(8,10)}/${item.date.slice(5,7)} · ${item.kind==='credit'?'Crédito':item.type==='card'?'Cartão':'Pix'} · ${item.done?'Realizado'+(item.doneAt?' em '+item.doneAt.slice(8,10)+'/'+item.doneAt.slice(5,7):''):'Previsto'}</p><div class="future-actions"><button class="icon-button" data-action="toggle-future" data-id="${esc(item.id)}">${item.done?'Voltar a previsto':'Marcar realizado'}</button><button class="icon-button" data-action="delete-future" data-id="${esc(item.id)}">Excluir</button></div></div></div>`).join('')}</div>` : '<p class="hint" style="margin-top:16px">Nenhum lançamento futuro. Você pode adicioná-los quando precisar.</p>'}
+      ${month.future.length ? `<div style="margin-top:8px">${[...month.future].sort((a,b)=>b.date.localeCompare(a.date) || (b.doneAt||'').localeCompare(a.doneAt||'')).map(item=>`
+        <div class="future-row ${item.done?'done':''}"><div class="icon">${item.kind==='credit'?'＋':item.type==='card'?'C':'P'}</div><div class="detail"><button type="button" class="record-main" data-action="edit-future" data-id="${esc(item.id)}" aria-label="Editar ${esc(item.description)}"><span class="spread"><strong class="record-name">${esc(item.description)}</strong><b class="money ${item.kind==='credit'?'accent':''}" style="white-space:nowrap;font-size:13px">${item.kind==='credit'?'+ ':'− '}${fmt(item.amount)}</b></span><span class="small record-date">${item.date.slice(8,10)}/${item.date.slice(5,7)} · ${item.kind==='credit'?'Crédito':item.type==='card'?'Cartão':'Pix'} · ${item.done?'Realizado'+(item.doneAt?' em '+item.doneAt.slice(8,10)+'/'+item.doneAt.slice(5,7):''):'Previsto'} <span class="edit-glyph">✎</span></span></button><div class="future-actions"><button class="icon-button" data-action="toggle-future" data-id="${esc(item.id)}">${item.done?'Voltar a previsto':'Marcar realizado'}</button><button class="icon-button" data-action="delete-future" data-id="${esc(item.id)}">Excluir</button></div></div></div>`).join('')}</div>` : '<p class="hint" style="margin-top:16px">Nenhum lançamento futuro. Você pode adicioná-los quando precisar.</p>'}
     </div>
     <div class="notice">As saídas previstas são reservadas imediatamente e distribuídas entre as semanas restantes. <b>Marcar realizado</b> atualiza o caixa ou a fatura provisoriamente. Quando você atualizar a posição bancária depois, o saldo informado substitui o ajuste automático, evitando duplicidade.</div>
     ${month.migratedFromCalendar ? `<div class="notice">Dados da versão antiga preservados. Confira o saldo e a fatura do início do mês financeiro em Metas → Editar (${financialPeriod(month.key).start.slice(8,10)}/${financialPeriod(month.key).start.slice(5,7)}).</div>` : ''}
+    ${heading('Aparência', 'Escolha seu tema')}
+    <div class="card"><p class="hint" style="margin-bottom:14px">Cinco paletas. A alteração vale para todo o aplicativo e não muda seus registros.</p>
+      ${[['claros','Tons suaves'],['escuros','Tons escuros']].map(([group,label])=>`<div class="theme-section"><h3>${label}</h3><div class="theme-grid">${THEMES.filter(t=>t.group===group).map(t=>`<button type="button" class="theme-choice ${theme===t.id?'is-active':''}" data-action="change-theme" data-theme="${t.id}" aria-pressed="${theme===t.id}" aria-label="Tema ${t.name}"><span class="theme-swatches">${t.swatches.map(c=>`<i style="background:${c}"></i>`).join('')}</span><span>${t.name}</span>${theme===t.id?'<small>✓</small>':''}</button>`).join('')}</div></div>`).join('')}
+    </div>
     ${heading('Base do planejamento')}
     <div class="card"><div class="indicator"><span class="indicator-label">Saldo inicial da conta</span><b class="indicator-value money">${fmt(month.startCash)}</b></div><div class="indicator"><span class="indicator-label">Fatura inicial</span><b class="indicator-value money">${fmt(month.startCard)}</b></div><div class="indicator"><span class="indicator-label">Gasto desde o início</span><b class="indicator-value money">${fmt(plan.spent)}</b></div></div>
   `;
 }
-function curvePath(points) { return points.map((p,i)=>`${i===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' '); }
-function renderGraph(month) {
-  const snaps = orderedSnapshots(month);
-  const dates = [...new Set([...snaps.map(s=>s.at),...month.future.filter(f=>f.done&&f.doneAt).map(f=>f.doneAt)])].sort();
-  const period = financialPeriod(month.key);
-  const W=400,H=204,left=40,right=10,top=15,bottom=31;
-  const baseY=H-bottom;
+function curvePath(points) {
+  return points.map((p,i)=>`${i===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+}
+function chartAmount(v) {
+  return Math.abs(v)>=100000 ? `${(v/100000).toLocaleString('pt-BR',{maximumFractionDigits:1})} mil` : (v/100).toLocaleString('pt-BR',{maximumFractionDigits:0});
+}
+function renderGraph(month,mode='spending') {
+  const snaps=orderedSnapshots(month), period=financialPeriod(month.key);
+  const W=390,H=244,left=57,right=13,top=22,bottom=34;
   const maxIndex=Math.max(1,period.days-1);
-  const toX = d=>left+(d/maxIndex)*(W-left-right);
-  const maxV = Math.max(month.budget,...dates.map(at=>spentSinceStart(month,position(month,at))),1);
-  const toY = v=>baseY-Math.max(0,v)/maxV*(baseY-top);
-  const planned = [[0,0],...period.weeks.map((w,i)=>[w.endOffset,month.goals.slice(0,i+1).reduce((a,b)=>a+b,0)])].map(([d,v])=>[toX(d),toY(v)]);
-  const real = dates.map(at=>[toX(dayIndex(month.key,at)),toY(spentSinceStart(month,position(month,at)))]);
-  const ticks=[{at:0,label:period.start.slice(8,10)+'/'+period.start.slice(5,7)},...period.weeks.map(w=>({at:w.endOffset,label:w.end.slice(8,10)+'/'+w.end.slice(5,7)}))];
-  return `<div class="graph"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico de gastos acumulados ao longo do mês financeiro, planejado e registrado">
-    ${[0,.5,1].map(n=>`<line class="gridline" x1="${left}" y1="${toY(maxV*n)}" x2="${W-right}" y2="${toY(maxV*n)}"/><text x="${left-5}" y="${toY(maxV*n)+4}" text-anchor="end">${(maxV*n/100/1000).toFixed(0)}k</text>`).join('')}
-    ${ticks.map(t=>`<text x="${toX(t.at)}" y="${H-9}" text-anchor="${t.at===0?'start':t.at===maxIndex?'end':'middle'}">${t.label}</text>`).join('')}
-    <path class="budgetline" d="${curvePath(planned)}"/>
-    ${real.length > 1 ? `<path class="series" d="${curvePath(real)}"/>` : ''}
-    ${real.map(point=>`<circle cx="${point[0]}" cy="${point[1]}" r="3.7" fill="#70d1af" stroke="#15231e" stroke-width="2"/>`).join('')}
-  </svg><div class="chart-legend"><span><i class="swatch gold"></i>Planejado</span><span><i class="swatch"></i>Registrado</span></div></div>`;
+  const xOf=at=>left+(Math.max(0,Math.min(maxIndex,dayIndex(month.key,at)))/maxIndex)*(W-left-right);
+  const actual=snaps.map(s=>{
+    const value=mode==='spending'?spentSinceStart(month,position(month,s.at)):s.cash;
+    return {date:s.at,value,label:`${labelDay(s.at)}: ${fmt(value)}`};
+  });
+  let sets;
+  if(mode==='spending'){
+    const goals=[{date:period.start,value:0,label:'Início: R$ 0,00'}];
+    let running=0;
+    period.weeks.forEach((w,i)=>{running+=month.goals[i]; goals.push({date:w.end,value:running,label:`Meta até ${w.end.slice(8,10)}/${w.end.slice(5,7)}: ${fmt(running)}`});});
+    sets=[{data:goals,style:'budgetline',name:'Planejado',color:'gold'},{data:[{date:period.start,value:0,label:'Início: R$ 0,00'},...actual],style:'series',name:'Registrado',color:'mint'}];
+  }else{
+    sets=[
+      {data:[{date:period.start,value:month.startCash,label:`Saldo inicial: ${fmt(month.startCash)}`},...snaps.map(s=>({date:s.at,value:s.cash,label:`Conta · ${labelDay(s.at)}: ${fmt(s.cash)}`}))],style:'series',name:'Saldo em conta',color:'mint'},
+      {data:[{date:period.start,value:month.startCard,label:`Fatura inicial: ${fmt(month.startCard)}`},...snaps.map(s=>({date:s.at,value:s.card,label:`Fatura · ${labelDay(s.at)}: ${fmt(s.card)}`}))],style:'budgetline',name:'Fatura em aberto',color:'gold'}
+    ];
+  }
+  const values=sets.flatMap(s=>s.data.map(d=>d.value));
+  const min=Math.min(0,...values),max=Math.max(1,...values),range=Math.max(1,max-min);
+  const yOf=v=>H-bottom-(v-min)/range*(H-top-bottom);
+  const ticks=Array.from({length:5},(_,i)=>min+(max-min)*i/4);
+  const markerId=mode==='spending'?'spending-area':'cash-area';
+  return `<div class="graph" role="group" aria-label="${mode==='spending'?'Despesas acumuladas em relação às metas':'Histórico do saldo da conta e fatura do cartão'}">
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${mode==='spending'?'Gráfico comparativo do gasto acumulado e da meta':'Gráfico comparativo do saldo e da fatura'}">
+      <defs><linearGradient id="${markerId}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--mint)" stop-opacity=".23"/><stop offset="1" stop-color="var(--mint)" stop-opacity="0"/></linearGradient></defs>
+      ${ticks.map(v=>`<line class="gridline" x1="${left}" y1="${yOf(v)}" x2="${W-right}" y2="${yOf(v)}"/><text x="${left-8}" y="${yOf(v)+4}" text-anchor="end">${chartAmount(v)}</text>`).join('')}
+      ${period.weeks.slice(0,3).map(w=>`<line class="week-divider" x1="${xOf(w.end)}" y1="${top}" x2="${xOf(w.end)}" y2="${H-bottom}"/>`).join('')}
+      ${[period.start,...period.weeks.map(w=>w.end)].map((d,i)=>`<text x="${xOf(d)}" y="${H-10}" text-anchor="${i===0?'start':i===4?'end':'middle'}">${d.slice(8,10)}/${d.slice(5,7)}</text>`).join('')}
+      ${sets.map((series,i)=>{
+        const pts=series.data.map(d=>[xOf(d.date),yOf(d.value)]);
+        const area=series.color==='mint'&&pts.length>1?`<path d="${curvePath(pts)} L${pts.at(-1)[0].toFixed(1)},${yOf(Math.max(0,min)).toFixed(1)} L${pts[0][0].toFixed(1)},${yOf(Math.max(0,min)).toFixed(1)} Z" fill="url(#${markerId})"/>`:'';
+        return area+`<path class="${series.style}" d="${curvePath(pts)}"/>`+series.data.map((d,j)=>`<circle class="plot-dot ${series.color}" cx="${pts[j][0].toFixed(1)}" cy="${pts[j][1].toFixed(1)}" r="${j===series.data.length-1?4.4:3.1}"><title>${esc(d.label)}</title></circle>`).join('');
+      }).join('')}
+    </svg>
+    <div class="chart-legend">${sets.map(s=>`<span><i class="swatch ${s.color==='gold'?'gold':''}"></i>${s.name}</span>`).join('')}</div>
+    <p class="fine chart-help">${snaps.length?'Pontos baseados nos saldos e faturas que você registrou. Toque nos pontos para detalhes.':'Sem atualizações ainda; a referência inicial está indicada no gráfico.'}</p>
+  </div>`;
+}
+function renderWeeklyGraph(month) {
+  const weekly=month.goals.map((goal,i)=>({goal,value:actualWeekSpent(month,i),label:rangeLabel(month.key,i)}));
+  const scale=Math.max(1,...weekly.flatMap(w=>[w.goal,w.value===null?0:Math.max(0,w.value)]));
+  return `<div class="card weekly-chart" role="group" aria-label="Comparação por semana com metas originais">
+    <div class="chart-legend" style="padding:0 0 15px"><span><i class="swatch gold"></i>Meta original</span><span><i class="swatch"></i>Realizado identificável</span></div>
+    ${weekly.map((w,i)=>`<div class="week-chart-row"><div class="spread"><strong>Semana ${i+1}</strong><span class="small">${w.label}</span></div><div class="bar-track"><span class="bar-fill goal" style="width:${Math.min(100,w.goal/scale*100).toFixed(2)}%"></span></div><div class="bar-track"><span class="bar-fill actual" style="width:${w.value===null?0:Math.min(100,Math.max(0,w.value)/scale*100).toFixed(2)}%"></span></div><div class="spread compare-numbers"><span>Meta ${fmt(w.goal)}</span><span>${w.value===null?'Realizado: sem referência':`Realizado ${fmt(w.value)}`}</span></div></div>`).join('')}
+    <p class="fine" style="margin-top:14px">Se não há posição anterior suficiente para isolar uma semana, o realizado fica sem referência em vez de ser estimado.</p>
+  </div>`;
 }
 function renderHistory(month) {
   const records = orderedSnapshots(month).reverse();
@@ -199,8 +259,14 @@ function renderHistory(month) {
     ${renderFinancialPosition(month)}
     ${heading('Gasto acumulado no mês')}
     <div class="two-stats">${stat('Gasto líquido no mês',fmt(plan.spent))}</div>
-    ${heading('Evolução dos gastos','Atualizações e lançamentos realizados')}
-    ${renderGraph(month)}
+    ${heading('Evolução financeira','Comparação baseada em posições registradas')}
+    <div class="chart-switch" role="group" aria-label="Selecionar gráfico">
+      <button type="button" data-action="chart-view" data-chart="spending" aria-pressed="${historyChart==='spending'}" class="${historyChart==='spending'?'active':''}">Gastos</button>
+      <button type="button" data-action="chart-view" data-chart="cash" aria-pressed="${historyChart==='cash'}" class="${historyChart==='cash'?'active':''}">Conta × fatura</button>
+    </div>
+    ${renderGraph(month,historyChart)}
+    ${heading('Desempenho semanal','Meta × realizado')}
+    ${renderWeeklyGraph(month)}
     ${heading('Posições registradas',`${records.length} atualização(ões)`)}
     <div class="week-tabs" role="group" aria-label="Filtrar histórico por semana" style="grid-template-columns:repeat(5,minmax(0,1fr));margin-top:0;margin-bottom:12px">
       ${[-1,0,1,2,3].map(i=>`<button type="button" data-action="select-history-week" data-week="${i}" class="week ${historyWeek===i?'active':''}" style="padding:12px 0"><strong>${i===-1?'Todas':`S${i+1}`}</strong></button>`).join('')}
@@ -209,10 +275,10 @@ function renderHistory(month) {
       const spent = spentSinceStart(month,s);
       const selected = weekOfDate(s.at);
       const r = calculatePlan(month,position(month,s.at),selected);
-      return `<div class="history-item"><div class="spread"><div><b>Semana ${selected+1}</b><p class="meta">${labelDay(s.at)}${s.note?' · '+esc(s.note):''}</p></div>${btn('delete-snapshot','Excluir','ghost compact',`data-id="${esc(s.id)}"`)}</div>
-      <div class="row-data"><span class="muted">Saldo / cartão</span><b>${fmt(s.cash)} / ${fmt(s.card)}</b></div>
-      <div class="row-data"><span class="muted">Gasto acumulado</span><b>${fmt(spent)}</b></div>
-      <div class="row-data"><span class="muted">Livre na semana</span><b class="accent">${fmt(r.available[selected] ?? 0)}</b></div></div>`;
+      return `<div class="history-item"><button type="button" class="history-main" data-action="edit-snapshot" data-id="${esc(s.id)}" aria-label="Editar posição de ${labelDay(s.at)}"><span class="spread"><span><strong>Semana ${selected+1}</strong><span class="meta" style="display:block">${labelDay(s.at)}${s.note?' · '+esc(s.note):''}</span></span><span class="edit-glyph">✎ Editar</span></span>
+      <span class="row-data"><span class="muted">Saldo / cartão</span><b>${fmt(s.cash)} / ${fmt(s.card)}</b></span>
+      <span class="row-data"><span class="muted">Gasto acumulado</span><b>${fmt(spent)}</b></span>
+      <span class="row-data"><span class="muted">Livre na semana</span><b class="accent">${fmt(r.available[selected] ?? 0)}</b></span></button><div class="record-bottom">${btn('delete-snapshot','Excluir registro','ghost compact',`data-id="${esc(s.id)}"`)}</div></div>`;
     }).join('')}</div>` : '<div class="empty"><h2>Nenhuma atualização</h2><p>Registre uma posição para visualizar a evolução nesta semana.</p></div>'}
     ${heading('Segurança dos dados')}
     <div class="card"><p class="hint">Os dados ficam neste navegador e não são sincronizados com o GitHub. Exporte um arquivo para guardar ou migrar para outro aparelho.</p><div class="buttons" style="margin-top:16px">${btn('export','Exportar JSON','secondary')}<label class="secondary file-label">Importar JSON<input id="import-file" type="file" accept="application/json,.json"></label></div><button data-action="reset-month" class="subtle-link" style="color:var(--danger);margin-top:12px">Apagar este mês</button></div>
@@ -252,6 +318,35 @@ function updateModal() {
     <div class="notice">Quando você pagar a fatura, o saldo da conta e a fatura em aberto diminuem. Isso não cria uma nova despesa.</div>
     <div class="modal-bottom"><button type="submit" class="primary wide">Registrar atualização</button></div>
   </form>`,'Atualizar posição');
+}
+function editSnapshotModal(snapId) {
+  const m=getMonth(); const snap=m?.snapshots.find(s=>s.id===snapId); if(!snap)return;
+  const period=financialPeriod(chosenMonth);
+  modal(`<form data-form="edit-snapshot" class="form-grid" novalidate>
+    <input type="hidden" name="recordId" value="${esc(snap.id)}">
+    <div class="field"><label for="edit-snapshot-at">Data e hora da posição</label><input type="datetime-local" id="edit-snapshot-at" name="at" min="${period.start}T00:00" max="${period.end}T23:59" value="${snap.at}" required></div>
+    ${input('cash','Saldo registrado da conta (R$)',inputAmount(snap.cash))}
+    ${input('card','Fatura registrada (R$)',inputAmount(snap.card))}
+    <div class="field"><label for="edit-snapshot-note">Observação (opcional)</label><input id="edit-snapshot-note" name="note" maxlength="100" value="${esc(snap.note||'')}"></div>
+    <p class="fine">Esta edição substitui o registro existente, sem criar uma nova atualização. Pode modificar os cálculos históricos.</p>
+    <div class="modal-bottom"><button type="submit" class="primary wide">Salvar alterações</button></div>
+  </form>`,'Editar posição');
+}
+function editFutureModal(itemId) {
+  const m=getMonth(); const item=m?.future.find(f=>f.id===itemId); if(!item)return;
+  const period=financialPeriod(chosenMonth);
+  const type=item.kind==='credit'?'credit':item.type;
+  modal(`<form data-form="edit-future" class="form-grid" novalidate>
+    <input type="hidden" name="recordId" value="${esc(item.id)}">
+    <p class="hint">Modifique os dados do lançamento. A situação Previsto/Realizado será preservada.</p>
+    <div class="field"><label for="edit-future-desc">Descrição</label><input type="text" id="edit-future-desc" name="description" maxlength="90" value="${esc(item.description)}" required></div>
+    <div class="fieldrow"><div class="field"><label for="edit-future-date">Data prevista</label><input type="date" id="edit-future-date" name="date" min="${period.start}" max="${period.end}" value="${item.date}" required></div>
+    <div class="field"><label for="edit-future-type">Tipo</label><select id="edit-future-type" name="type"><option value="pix" ${type==='pix'?'selected':''}>Saída · Pix</option><option value="card" ${type==='card'?'selected':''}>Saída · Cartão</option><option value="credit" ${type==='credit'?'selected':''}>Entrada · Crédito</option></select></div></div>
+    ${input('amount','Valor (R$)',inputAmount(item.amount))}
+    ${item.done ? `<div class="field"><label for="edit-future-doneAt">Data e hora da realização</label><input type="datetime-local" id="edit-future-doneAt" name="doneAt" min="${period.start}T00:00" max="${period.end}T23:59" value="${esc(item.doneAt||item.date+'T12:00')}" required></div>`:''}
+    <div class="notice">Situação atual: <b>${item.done?'Realizado':'Previsto'}</b>. Para alterá-la, use o botão do registro na lista de Metas.</div>
+    <div class="modal-bottom"><button type="submit" class="primary wide">Salvar alterações</button></div>
+  </form>`,'Editar lançamento');
 }
 function futureModal() {
   const period=financialPeriod(chosenMonth);
@@ -321,6 +416,35 @@ function submitFuture(form) {
   m.future.push({id:id(),date,description,type:type==='credit'?'pix':type,kind:type==='credit'?'credit':'debit',amount,done:false});
   save();closeModal();render();notify('Lançamento adicionado.');
 }
+function submitEditSnapshot(form) {
+  const m=getMonth(); const original=m?.snapshots.find(s=>s.id===form.elements.recordId.value); if(!original)throw new Error('Registro não localizado.');
+  const at=form.elements.at.value;
+  if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(at)||!inFinancialMonth(at,chosenMonth)||!Number.isFinite(Date.parse(at)))throw new Error('Informe uma data válida no mês financeiro.');
+  const cash=parseNonnegative(form,'cash'), card=parseNonnegative(form,'card');
+  const note=(form.elements.note.value||'').trim().slice(0,100);
+  const backup={...original};
+  Object.assign(original,{at,cash,card,note});
+  if(!validateState(state)){Object.assign(original,backup);throw new Error('Os dados editados são inválidos.');}
+  save();closeModal();chosenWeek=weekOfDate(at);render();notify('Posição atualizada.');
+}
+function submitEditFuture(form) {
+  const m=getMonth(); const original=m?.future.find(f=>f.id===form.elements.recordId.value); if(!original)throw new Error('Lançamento não localizado.');
+  const date=form.elements.date.value, description=form.elements.description.value.trim();
+  const type=form.elements.type.value, amount=parseNonnegative(form,'amount',false);
+  if(!inFinancialMonth(date,chosenMonth)||!description||!['pix','card','credit'].includes(type))throw new Error('Informe data, descrição e tipo válidos.');
+  const doneAt=original.done?form.elements.doneAt.value:null;
+  if(original.done && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(doneAt)||!inFinancialMonth(doneAt,chosenMonth)||!Number.isFinite(Date.parse(doneAt))))throw new Error('Data da realização inválida.');
+  const backup={...original};
+  Object.assign(original,{date,description,amount,type:type==='credit'?'pix':type,kind:type==='credit'?'credit':'debit'});
+  if(original.done) {
+    original.doneAt=doneAt;
+    // Se o instante da realização mudou, recalcula a referência para não
+    // lançar novamente sobre uma posição bancária posterior.
+    if(backup.doneAt!==doneAt)original.snapshotCountAtDone=orderedSnapshots(m).filter(s=>s.at<=doneAt).length;
+  }
+  if(!validateState(state)){Object.assign(original,backup);throw new Error('O lançamento editado é inválido.');}
+  save();closeModal();render();notify('Lançamento atualizado.');
+}
 function submitCredit(form) {
   const m=getMonth();if(!m)return;
   const at=form.elements.at.value;
@@ -364,7 +488,16 @@ document.addEventListener('click',event=>{
   switch(action){
     case 'select-week': chosenWeek=Number(target.dataset.week);render();break;
     case 'select-history-week': historyWeek=Number(target.dataset.week);render();break;
+    case 'chart-view':historyChart=target.dataset.chart==='cash'?'cash':'spending';render();break;
     case 'open-setup':setupModal();break;
+    case 'edit-goal':{
+      setupModal();
+      modalRoot.querySelector(`[name="goal${Number(target.dataset.week)}"]`)?.focus({preventScroll:true});
+      break;
+    }
+    case 'edit-snapshot':editSnapshotModal(target.dataset.id);break;
+    case 'edit-future':editFutureModal(target.dataset.id);break;
+    case 'change-theme':setTheme(target.dataset.theme);break;
     case 'open-update':updateModal();break;
     case 'open-future':futureModal();break;
     case 'open-credit':creditModal();break;
@@ -416,6 +549,8 @@ document.addEventListener('submit', event=>{
     if(form.dataset.form==='setup') submitSetup(form);
     else if(form.dataset.form==='update') submitUpdate(form);
     else if(form.dataset.form==='future') submitFuture(form);
+    else if(form.dataset.form==='edit-snapshot') submitEditSnapshot(form);
+    else if(form.dataset.form==='edit-future') submitEditFuture(form);
     else if(form.dataset.form==='credit') submitCredit(form);
   } catch(err){notify(err.message||'Verifique os campos.');}
 });

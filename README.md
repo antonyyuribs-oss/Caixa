@@ -1,82 +1,37 @@
-# RASTRO - C — controle financeiro semanal
+# RASTRO - C — V6
 
-Aplicativo PWA em português, com valores em reais, para GitHub Pages. Não precisa de conta, servidor ou bibliotecas externas. Os dados ficam apenas no navegador.
-
-## Calendário e metas
-
-- Cada mês financeiro começa no **dia 26 do mês anterior** e termina no **dia 25** do mês de referência.
-- As quatro semanas são divididas de maneira equilibrada; outubro de 2026: 26/09–03/10, 04/10–11/10, 12/10–18/10 e 19/10–25/10.
-- As **metas originais** são definidas uma vez por mês e permanecem visíveis. A **meta disponível** se recalcula com gastos, créditos e previsões.
-- O aplicativo considera **caixa livre = dinheiro na conta − fatura em aberto**. O fechamento pretendido é zero depois de destinar todos os recursos, inclusive eventual Pix para investimento.
-
-## Primeira configuração
-
-1. Entre em **Metas → Editar**, defina o orçamento mensal e as quatro metas semanais. A soma das quatro metas deve ser igual ao orçamento mensal.
-2. Preencha o **saldo bancário inicial** e a **fatura inicial** na abertura financeira (dia 26).
-3. Em **Painel → Atualizar posição**, informe o **saldo total atual** e a **fatura total em aberto**, não apenas a diferença da última atualização.
-4. Consulte no Painel quanto **resta para novos gastos na semana**. Pode atualizar a posição quantas vezes quiser.
-
-## Despesas previstas e créditos
-
-Em **Metas → Lançamentos → Adicionar**, cadastre:
-
-- **Saída · Pix:** pagamento que futuramente reduzirá o saldo da conta.
-- **Saída · Cartão:** compra que aumentará o valor da fatura em aberto.
-- **Entrada · Crédito:** dinheiro esperado na conta, como recebimento ou reembolso.
-
-O campo **data** indica quando o lançamento é esperado. Uma despesa futura já é abatida **imediatamente do dinheiro livre das semanas ainda abertas**, distribuindo a dedução proporcionalmente à disponibilidade de cada uma; não precisa aguardar o vencimento. Um crédito previsto aumenta a projeção **a partir da semana do recebimento programado**.
-
-Para lançar dinheiro que **já entrou**, vá ao **Painel → Registrar crédito recebido**. Ele entra como realizado e atualiza o cálculo imediatamente.
-
-### Botão “Marcar realizado”
-
-Esta opção foi mantida e **altera os cálculos de verdade**:
-
-- Despesa por Pix realizada → reduz provisoriamente o dinheiro em conta.
-- Despesa no cartão realizada → aumenta provisoriamente a fatura em aberto.
-- Crédito realizado → aumenta provisoriamente o dinheiro em conta.
-- O lançamento deixa de ser **Previsto** e passa a **Realizado**, sem ser somado duas vezes à previsão.
-- **Voltar a previsto** permite desfazer a marcação.
-
-**Ordem recomendada:** primeiro marque os lançamentos como realizados; depois confira **Painel → Atualizar posição** e registre os saldos bancários verdadeiros. A nova posição bancária **substitui os efeitos provisórios** dos lançamentos já realizados, evitando duplicação. Se você já atualizou o banco/fatura e só depois marcou a despesa como realizada, **atualize a posição novamente** com os valores atuais para que o aplicativo não a desconte duas vezes.
-
-Ao pagar uma fatura, o saldo bancário e a fatura caem simultaneamente pelo mesmo valor. Isso não representa um novo gasto. Um Pix para investimento é considerado uma saída normal, conforme sua preferência.
-
-### Exemplo
-
-Orçamento: R$ 12.000; quatro metas de R$ 3.000. Se até o fim da segunda semana a fatura chegar a R$ 8.000, restam R$ 4.000 para as semanas 3 e 4: R$ 1.000 para S3 e R$ 3.000 para S4. Se você cadastrar um Pix futuro de R$ 1.800 para S4, ele será reservado **desde já**: passam a sobrar R$ 550 para S3 e R$ 1.650 para S4. Marcá-lo realizado altera o saldo, porém não cobra o valor duas vezes.
+Aplicativo web estático, em português, pronto para GitHub Pages. Nenhuma instalação de servidor ou conta bancária é necessária.
 
 ## Atualizar no GitHub Pages
 
-1. **Antes de atualizar:** acesse **Histórico → Exportar JSON** e faça uma cópia do seu backup.
-2. Extraia o ZIP e envie o conteúdo da pasta para a **raiz** do repositório. Substitua `index.html`, `app.js`, `logic.js`, `styles.css`, `service-worker.js`, `README.md` e os demais arquivos.
-3. Em **Settings → Pages**, selecione **Deploy from a branch → main → /(root)**.
-4. No iPhone, abra o site publicado no Safari e use **Compartilhar → Adicionar à Tela de Início**, se desejar.
-5. Se uma versão anterior continuar aparecendo, atualize a página e feche/reabra o aplicativo para renovar o cache.
+1. Faça **Histórico → Exportar JSON** no aplicativo atual e guarde o arquivo em local seguro.
+2. Descompacte o ZIP e envie os arquivos **do interior da pasta** para a raiz do repositório `Caixa`, substituindo os arquivos existentes. Inclua o novo arquivo `themes.css`.
+3. No GitHub, confirme em Settings → Pages que a publicação usa `main` e `/(root)`.
+4. Reabra o aplicativo pelo mesmo endereço. Se o tema ou a tela não atualizar imediatamente, feche o app da tela inicial do iPhone e abra novamente; se necessário, reabra pelo Safari.
 
-A nova versão lê os registros anteriores automaticamente e mantém uma cópia não modificada do armazenamento antigo. Também aceita backups JSON antigos para importação. **Não apague o armazenamento do navegador.** O backup contém informações financeiras em texto simples: guarde-o em local privado.
+**Não apague os dados do navegador nem desinstale o aplicativo antes de ter um backup.** Os dados financeiros continuam sob a mesma chave (`caixa-semanal-v3`) e mantêm o mesmo formato JSON da versão anterior; não é preciso importar outra vez se usar o mesmo navegador e endereço. O tema visual fica guardado neste aparelho, separadamente dos dados financeiros.
 
-## Histórico e testes
+## O que mudou na V6
 
-**Histórico** apresenta as posições registradas, as despesas acumuladas e o gráfico. Os lançamentos realizados também influenciam o gráfico. O aplicativo não acessa sua conta bancária nem envia Pix.
+- **Todos os registros tocáveis:** em **Metas**, toque na descrição de qualquer lançamento (previsto ou realizado) para editar descrição, valor, tipo e data; os realizados também permitem corrigir data/hora de realização. O botão **Marcar realizado / Voltar a previsto** foi preservado.
+- **Histórico:** toque em qualquer posição de saldo e fatura para editar seus valores, data e observação. Os dados são **substituídos**, não duplicados. Para excluir, use o botão próprio.
+- **Metas:** toque no quadro de uma semana para abrir a edição do planejamento original (a soma das quatro semanas deve corresponder ao orçamento mensal).
+- **Ordem dos lançamentos:** de data mais recente para mais antiga, incluindo os realizados.
+- **Cinco temas visuais em Metas → Aparência:** Nude, Rosé, Grafite, Marinho e Oliva. São alterações somente de cores; o funcionamento financeiro é o mesmo.
+- **Histórico com gráficos ampliados:** escolha entre **Gastos** (acumulado x meta original) e **Conta × fatura**. Há também barras de comparação semanal. Sem posição anterior suficiente, o gasto semanal fica identificado como **sem referência**, em vez de estimado.
 
-Para rodar testes unitários (Node.js 18+), execute `npm test`. Para abrir localmente, use um servidor estático (`python -m http.server 8000`).
+## Regras financeiras mantidas
 
-## Correção 1.3 — conciliação de faturas e lançamentos
+- O mês financeiro vai do **dia 26 ao dia 25** do mês seguinte; suas quatro semanas se ajustam à duração do período.
+- A meta original de cada semana fica preservada; a meta livre é recalculada com fatura, caixa e previsões.
+- Despesas futuras são reservadas já no momento do lançamento; créditos futuros são considerados a partir de sua semana de previsão.
+- Pagamentos por Pix reduzem o caixa. Compras no cartão aumentam a fatura. O pagamento posterior do cartão não é contado de novo como gasto.
+- Ao marcar um lançamento realizado, ele afeta provisoriamente o caixa ou cartão. Quando você informar uma posição bancária posterior, os saldos registrados prevalecem, evitando duplicidade.
 
-- As despesas e entradas **já realizadas e incluídas no saldo registrado** não geram uma segunda reserva de pagamento.
-- A disponibilidade projetada considera despesas pendentes e créditos ainda previstos **uma única vez**.
-- O alerta de caixa verifica, por data, se há cobertura para os pagamentos antes da chegada das entradas futuras.
-- O cálculo não atribui a fatura acumulada de uma única atualização integralmente à semana corrente. Sem uma posição de referência na semana anterior, a comparação de **meta semanal recalculada** fica indisponível; o **caixa disponível** e a **projeção mensal** continuam sendo calculados.
-- Ao prever um crédito na própria semana, o número principal é uma **projeção**: até o crédito chegar, consulte o saldo real antes de gastar.
-- O modelo de dados é o mesmo (`caixa-semanal-v3`): a atualização do código **não exige reimportar JSON** nem apaga registros salvos no navegador. Faça sempre backup antes de substituir os arquivos.
+## Backup, privacidade e implantação
 
+Os dados permanecem no armazenamento local do navegador. O GitHub Pages hospeda o código, **não o seu extrato bancário**. Histórico → Exportar JSON cria um backup que você pode importar mais tarde. Importar substitui todo o conteúdo existente naquele navegador.
 
-## Versão 1.4 — interface reorganizada
+Arquivos principais: `index.html`, `app.js`, `logic.js`, `styles.css`, `themes.css`, `service-worker.js`, `manifest.webmanifest` e ícones.
 
-- O **Painel** exibe somente o cabeçalho, mês financeiro, as quatro semanas e o quadro principal com a meta livre, meta recalculada, ajuste e situação.
-- **Metas** reúne orçamento, metas originais e recalculadas, totais de despesas e créditos previstos, lançamentos e base do planejamento.
-- **Histórico** reúne a posição financeira (saldo, fatura e cobertura), botões **Atualizar posição** e **Registrar crédito recebido**, gráfico, registros e backup JSON.
-- Nome exibido no app, título e instalação: **RASTRO - C**.
-- O cabeçalho respeita `safe-area-inset-top` do iPhone, para não ficar sobreposto ao relógio, sinal e bateria.
-- **Nenhum dado é apagado**, e o formato do JSON continua igual; apenas a aparência e a organização das telas foram alteradas. Faça backup por segurança antes de substituir os arquivos.
+Para testar os cálculos com Node.js (opcional): `npm test`.

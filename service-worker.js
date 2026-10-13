@@ -1,5 +1,5 @@
-const CACHE = 'caixa-semanal-cache-v7-layout-rastro-c';
-const ASSETS = ['./','./index.html','./styles.css','./app.js','./logic.js','./manifest.webmanifest','./icon.svg','./icon-192.png','./icon-512.png'];
+const CACHE = 'caixa-semanal-cache-v8-edit-themes-charts';
+const ASSETS = ['./','./index.html','./styles.css','./themes.css','./app.js','./logic.js','./manifest.webmanifest','./icon.svg','./icon-192.png','./icon-512.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
 });
